@@ -36,14 +36,13 @@ const quickPrompts = [
 export function AssistantView() {
   const { state, notify, updateSuggestion } = usePortal();
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "coach", content: "帮我分析一下李明最近的训练和恢复情况，他上周感觉肩部有些酸痛。", time: "10:32" },
-    { role: "assistant", content: "我已汇总近 7 天训练、恢复、睡眠与身体数据。李明的下肢训练保持稳定，但上肢推举负荷偏高；平均睡眠 6.2 小时，恢复评分下降到 68。建议降低上肢推举强度并安排肩部放松评估。", time: "10:33" },
+    { role: "assistant", content: `你好，${state.profile.name}。我是 Hermes，可以结合你的训练、饮食、睡眠和身体记录提供个性化建议。你可以先告诉我当前训练目标。`, time: now() },
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [memberOpen, setMemberOpen] = useState(false);
-  const [selectedMember, setSelectedMember] = useState("李明");
+  const [selectedMember, setSelectedMember] = useState(state.profile.name);
   const [editing, setEditing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const suggestion = state.suggestions[0];

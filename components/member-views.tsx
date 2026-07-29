@@ -37,6 +37,7 @@ const weeklyDays = ["一", "二", "三", "四", "五", "六", "日"];
 export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
   const { state, checkIn } = usePortal();
   const latest = state.bodyMetrics.at(-1);
+  const onboarding = !latest;
   const mealCalories = state.meals
     .filter((meal) => meal.completed)
     .reduce((sum, meal) => sum + meal.calories, 0);
@@ -47,7 +48,7 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
         <div>
           <span className="eyebrow">会员工作台</span>
           <h1>早上好，{state.profile.name}</h1>
-          <p>今天安排了一次下肢力量训练，记得提前补充水分。</p>
+          <p>{onboarding ? "账号已创建。先完成身体数据记录，邵教练会据此为你建立专属计划。" : "今天安排了一次下肢力量训练，记得提前补充水分。"}</p>
         </div>
         <button className="button button-primary compact-on-mobile" onClick={checkIn}>
           <CalendarCheck size={18} /> 今日打卡
@@ -55,10 +56,10 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
       </section>
 
       <div className="stats-grid four">
-        <StatCard icon={Dumbbell} label="本周训练次数" value="4" suffix="/ 5 次" note="完成 80%" />
-        <StatCard icon={Flame} label="本周消耗（预估）" value="6,240" suffix="kcal" note="较上周 ↑12%" accent="amber" />
+        <StatCard icon={Dumbbell} label="本周训练次数" value={onboarding ? "0" : "4"} suffix={onboarding ? "次" : "/ 5 次"} note={onboarding ? "等待教练制定计划" : "完成 80%"} />
+        <StatCard icon={Flame} label="本周消耗（预估）" value={onboarding ? "0" : "6,240"} suffix="kcal" note={onboarding ? "训练后自动累计" : "较上周 ↑12%"} accent="amber" />
         <StatCard icon={Target} label="连续打卡" value={state.streak} suffix="天" note="连续保持中" />
-        <StatCard icon={HeartPulse} label="综合评分" value="92" suffix="分" note="优秀" accent="slate" />
+        <StatCard icon={HeartPulse} label="综合评分" value={onboarding ? "—" : "92"} suffix={onboarding ? "" : "分"} note={onboarding ? "完成建档后生成" : "优秀"} accent="slate" />
       </div>
 
       <div className="dashboard-main-grid">
@@ -85,10 +86,10 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
         <Card>
           <SectionTitle title="本周训练目标" />
           <div className="goal-list">
-            <GoalRow icon={Dumbbell} label="完成 4 次力量训练" value="4 / 5 次" percent={80} />
-            <GoalRow icon={Flame} label="累计消耗 6500 kcal" value="6,240 / 6,500" percent={96} />
-            <GoalRow icon={CalendarCheck} label="打卡 5 天" value="4 / 5 天" percent={80} />
-            <GoalRow icon={Apple} label="蛋白质摄入达标" value="今日已达标" percent={100} />
+            <GoalRow icon={Dumbbell} label={onboarding ? "等待训练计划" : "完成 4 次力量训练"} value={onboarding ? "待制定" : "4 / 5 次"} percent={onboarding ? 0 : 80} />
+            <GoalRow icon={Flame} label={onboarding ? "开始记录训练" : "累计消耗 6500 kcal"} value={onboarding ? "0 kcal" : "6,240 / 6,500"} percent={onboarding ? 0 : 96} />
+            <GoalRow icon={CalendarCheck} label="本周训练打卡" value={onboarding ? "0 天" : "4 / 5 天"} percent={onboarding ? 0 : 80} />
+            <GoalRow icon={Apple} label="记录每日饮食" value={onboarding ? "尚未记录" : "今日已达标"} percent={onboarding ? 0 : 100} />
           </div>
         </Card>
 
@@ -100,7 +101,7 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
           <div className="chart-shell">
             <TrendChart data={state.bodyMetrics} dataKey="weight" height={205} valueSuffix=" kg" />
           </div>
-          <div className="trend-note"><TrendingDown size={17} /> 近三周体重下降 <strong>2.9 kg</strong>，节奏稳定。</div>
+          <div className="trend-note">{onboarding ? <><Scale size={17} /> 完成首次身体数据记录后，这里会生成你的专属趋势。</> : <><TrendingDown size={17} /> 近三周体重下降 <strong>2.9 kg</strong>，节奏稳定。</>}</div>
         </Card>
 
         <Card>
@@ -108,8 +109,8 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
           <div className="coach-note">
             <Avatar name="邵教练" size="lg" />
             <div>
-              <p>本周力量训练完成度很高，恢复状态良好。训练后优先补充优质蛋白，今晚保证 7–8 小时睡眠。</p>
-              <span>— 邵教练 · 今天 09:30</span>
+              <p>{onboarding ? "欢迎加入。请先填写身体数据与训练目标，我确认后会为你制定个性化训练和饮食建议。" : "本周力量训练完成度很高，恢复状态良好。训练后优先补充优质蛋白，今晚保证 7–8 小时睡眠。"}</p>
+              <span>— 邵教练{onboarding ? "" : " · 今天 09:30"}</span>
             </div>
           </div>
           <button className="button button-secondary full" onClick={() => goTo("assistant")}>
@@ -124,19 +125,19 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
           <div className="split-center">
             <Ring value={(mealCalories / 1800) * 100} label={`${mealCalories}`} sublabel="/ 1800 kcal" />
             <div className="macro-list">
-              <Macro label="蛋白质" value="124 / 120g" percent={100} />
-              <Macro label="碳水" value="173 / 180g" percent={96} />
-              <Macro label="脂肪" value="51 / 60g" percent={85} />
+              <Macro label="蛋白质" value={onboarding ? "尚未记录" : "124 / 120g"} percent={onboarding ? 0 : 100} />
+              <Macro label="碳水" value={onboarding ? "尚未记录" : "173 / 180g"} percent={onboarding ? 0 : 96} />
+              <Macro label="脂肪" value={onboarding ? "尚未记录" : "51 / 60g"} percent={onboarding ? 0 : 85} />
             </div>
           </div>
         </Card>
         <Card>
           <SectionTitle title="打卡记录" action={<button className="text-button" onClick={() => goTo("checkins")}>查看全部 <ArrowRight size={15} /></button>} />
           <div className="streak-panel">
-            <Ring value={72} label={`${state.streak} 天`} sublabel="连续保持中" />
+            <Ring value={state.streak ? 72 : 0} label={`${state.streak} 天`} sublabel={state.streak ? "连续保持中" : "从今天开始"} />
             <div className="week-dots">
               {weeklyDays.map((day, index) => (
-                <span key={day} className={index < 6 ? "done" : ""}><Check size={14} /><small>{day}</small></span>
+                <span key={day} className={index < Math.min(6, state.streak) ? "done" : ""}><Check size={14} /><small>{day}</small></span>
               ))}
             </div>
           </div>
@@ -412,8 +413,8 @@ export function BodyView() {
         </div>
       </Card>
       <div className="content-grid-3">
-        <Card><SectionTitle title="目标进度" /><div className="goal-big"><strong>72%</strong><span>距离 65 kg 还差 2.9 kg</span><ProgressBar value={72} /></div></Card>
-        <Card><SectionTitle title="本月变化" /><div className="delta-grid"><div><b>-1.9</b><span>kg 体重</span></div><div><b>-0.7</b><span>% 体脂</span></div><div><b>+0.8</b><span>kg 肌肉</span></div></div></Card>
+        <Card><SectionTitle title="目标进度" /><div className="goal-big"><strong>{latest ? "72%" : "0%"}</strong><span>{latest ? "距离 65 kg 还差 2.9 kg" : "记录首次数据后设置目标"}</span><ProgressBar value={latest ? 72 : 0} /></div></Card>
+        <Card><SectionTitle title="本月变化" /><div className="delta-grid"><div><b>{latest ? "-1.9" : "—"}</b><span>kg 体重</span></div><div><b>{latest ? "-0.7" : "—"}</b><span>% 体脂</span></div><div><b>{latest ? "+0.8" : "—"}</b><span>kg 肌肉</span></div></div></Card>
         <Card><SectionTitle title="测量提示" /><p className="body-copy">起床排空后、早餐前测量；穿着保持一致。短期波动多来自水分，关注 2–4 周趋势。</p></Card>
       </div>
       {open ? (
