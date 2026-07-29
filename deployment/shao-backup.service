@@ -1,0 +1,18 @@
+[Unit]
+Description=Shao Coach PostgreSQL Backup
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=shaoapp
+Group=shaoapp
+WorkingDirectory=/opt/shao-coach
+EnvironmentFile=/opt/shao-coach/.env
+Environment=BACKUP_DIR=/var/backups/shao-coach
+ExecStart=/bin/sh /opt/shao-coach/scripts/backup-postgres.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/shao-coach

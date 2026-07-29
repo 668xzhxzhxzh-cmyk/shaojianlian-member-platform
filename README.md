@@ -67,6 +67,8 @@ IP 验收阶段使用 `SITE_ADDRESS=http://公网IP`、`PUBLIC_URL=http://公网
 - `deployment/hermes-gateway.service`
 - `deployment/shao-hermes-send`
 - `deployment/shao-hermes-send.sudoers`
+- `deployment/shao-backup.service`
+- `deployment/shao-backup.timer`
 - `deployment/nginx-ip.conf`
 
 生产目录固定为 `/opt/shao-coach`，`.env` 权限应为 `root:shaoapp 0640`；网站、API 和 Hermes API 均只监听 `127.0.0.1`，公网仅由 Nginx 暴露 80/443。Hermes 以独立的 `hermes` 系统用户运行，并通过 systemd 设置内存上限、自动重启与最小文件访问权限。当前 IP 验收完成后，再替换 Nginx 配置中的域名并接入 HTTPS。
@@ -100,7 +102,7 @@ IP 验收阶段使用 `SITE_ADDRESS=http://公网IP`、`PUBLIC_URL=http://公网
 sh scripts/backup-postgres.sh
 ```
 
-可在 ECS 中配置每天凌晨 03:15 运行，并将 `backups/` 同步到阿里云 OSS。脚本默认清理 14 天前的本地备份。
+原生 ECS 部署安装 `shao-backup.service` 与 `shao-backup.timer` 后，会在每天凌晨 03:15（Asia/Shanghai，最多随机延迟 5 分钟）自动执行，并默认清理 14 天前的本地备份。生产环境还应将备份异地同步到阿里云 OSS。
 
 恢复前先停止写入，再执行：
 
