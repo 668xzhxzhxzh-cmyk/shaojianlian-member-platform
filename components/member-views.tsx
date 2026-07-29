@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import {
   Activity,
   Apple,
@@ -28,18 +28,9 @@ import {
   Utensils,
   X,
 } from "lucide-react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { trainingExercises } from "@/lib/portal-data";
 import { usePortal } from "./portal-context";
-import { Avatar, Card, ProgressBar, Ring, SectionTitle, StatCard } from "./ui";
+import { Avatar, Card, ProgressBar, Ring, SectionTitle, StatCard, TrendChart } from "./ui";
 
 const weeklyDays = ["一", "二", "三", "四", "五", "六", "日"];
 
@@ -107,15 +98,7 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
             action={<button className="segmented-active" onClick={() => goTo("body")}>体重</button>}
           />
           <div className="chart-shell">
-            <ResponsiveContainer width="100%" height={205}>
-              <LineChart data={state.bodyMetrics} margin={{ top: 8, right: 16, left: -18, bottom: 0 }}>
-                <CartesianGrid stroke="#e8e6dd" vertical={false} />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: "#807f75", fontSize: 12 }} />
-                <YAxis domain={["dataMin - 1", "dataMax + 1"]} axisLine={false} tickLine={false} tick={{ fill: "#807f75", fontSize: 12 }} />
-                <Tooltip contentStyle={{ borderRadius: 10, borderColor: "#dedaCE", background: "#fffdf8" }} />
-                <Line type="monotone" dataKey="weight" stroke="#3f4d31" strokeWidth={2.5} dot={{ r: 4, fill: "#fffdf8", strokeWidth: 2 }} activeDot={{ r: 6 }} />
-              </LineChart>
-            </ResponsiveContainer>
+            <TrendChart data={state.bodyMetrics} dataKey="weight" height={205} valueSuffix=" kg" />
           </div>
           <div className="trend-note"><TrendingDown size={17} /> 近三周体重下降 <strong>2.9 kg</strong>，节奏稳定。</div>
         </Card>
@@ -264,16 +247,28 @@ function Timeline({ time, title, detail, done, active }: { time: string; title: 
 }
 
 export function NutritionView() {
-  const { state, addWater, toggleMeal } = usePortal();
+  const { state, addWater, toggleMeal, notify } = usePortal();
+  const [goalOpen, setGoalOpen] = useState(false);
+  const [calorieGoal, setCalorieGoal] = useState(1800);
   const calories = state.meals.filter((meal) => meal.completed).reduce((sum, meal) => sum + meal.calories, 0);
+
+  function saveGoal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const nextGoal = Math.min(5000, Math.max(1000, Number(data.get("calorieGoal")) || 1800));
+    setCalorieGoal(nextGoal);
+    setGoalOpen(false);
+    notify(`营养目标已更新为 ${nextGoal} 千卡`);
+  }
+
   return (
     <div className="view-stack">
       <PageIntro eyebrow="饮食管理" title="吃得科学，也吃得从容" text="每一餐都为今天的训练和明天的恢复服务。" />
       <div className="nutrition-hero-grid">
         <Card className="span-2">
-          <SectionTitle title="今日营养进度" action={<button className="button button-secondary button-small">调整目标</button>} />
+          <SectionTitle title="今日营养进度" action={<button className="button button-secondary button-small" onClick={() => setGoalOpen(true)}>调整目标</button>} />
           <div className="nutrition-progress">
-            <Ring value={(calories / 1800) * 100} label={`${calories}`} sublabel="/ 1800 kcal" />
+            <Ring value={(calories / calorieGoal) * 100} label={`${calories}`} sublabel={`/ ${calorieGoal} kcal`} />
             <div className="macro-list large">
               <Macro label="碳水化合物" value="173 / 180 g" percent={96} />
               <Macro label="蛋白质" value="124 / 120 g" percent={100} />
@@ -320,6 +315,16 @@ export function NutritionView() {
           <Card className="warning-card"><HeartPulse size={22} /><div><b>今日需要注意</b><p>蛋白质略高于目标，晚餐减少额外蛋白粉；饮水量仍差 700 ml。</p></div></Card>
         </div>
       </div>
+      {goalOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setGoalOpen(false)}>
+          <form className="modal modal-compact" onSubmit={saveGoal} onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="icon-button modal-close" onClick={() => setGoalOpen(false)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">营养目标</span><h2>调整每日摄入目标</h2><p>目标会立即用于今日进度计算，正式方案仍建议由教练确认。</p>
+            <label className="stacked-label">每日热量（千卡）<input name="calorieGoal" type="number" min="1000" max="5000" step="50" defaultValue={calorieGoal} required /></label>
+            <button className="button button-primary full" type="submit">保存目标</button>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -329,7 +334,7 @@ function Swap({ from, to, note }: { from: string; to: string; note: string }) {
 }
 
 export function CheckinsView() {
-  const { state, checkIn } = usePortal();
+  const { state, checkIn, notify } = usePortal();
   const days = Array.from({ length: 31 }, (_, index) => index + 1);
   return (
     <div className="view-stack">
@@ -348,7 +353,7 @@ export function CheckinsView() {
             {days.map((day) => {
               const done = day >= 7 && day <= 28;
               const today = day === 29;
-              return <button key={day} className={`${done ? "done" : ""} ${today ? "today" : ""}`} onClick={today ? checkIn : undefined}><span>{day}</span>{done ? <Check size={13} /> : today ? <CircleDot size={13} /> : null}</button>;
+              return <button key={day} className={`${done ? "done" : ""} ${today ? "today" : ""}`} onClick={today ? checkIn : () => notify(`7 月 ${day} 日${done ? "已完成打卡" : "没有打卡记录"}`, "info")}><span>{day}</span>{done ? <Check size={13} /> : today ? <CircleDot size={13} /> : null}</button>;
             })}
           </div>
           <div className="calendar-legend"><span><i className="legend-done" /> 已完成</span><span><i className="legend-today" /> 今天</span><span><i /> 未打卡</span></div>
@@ -370,8 +375,11 @@ export function CheckinsView() {
 export function BodyView() {
   const { state, saveBodyMetric } = usePortal();
   const [open, setOpen] = useState(false);
+  const [metric, setMetric] = useState<"weight" | "bodyFat" | "muscle">("weight");
   const latest = state.bodyMetrics.at(-1)!;
   const previous = state.bodyMetrics.at(-2)!;
+  const metricLabels = { weight: "体重", bodyFat: "体脂率", muscle: "肌肉量" };
+  const metricSuffix = { weight: " kg", bodyFat: "%", muscle: " kg" };
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -398,17 +406,9 @@ export function BodyView() {
         <StatCard icon={Footprints} label="腰围" value={latest.waist} suffix="cm" note="近三周 -3.1 cm" accent="slate" />
       </div>
       <Card>
-        <SectionTitle title="近 30 天身体趋势" action={<div className="segmented"><button className="active">体重</button><button>体脂率</button><button>肌肉量</button></div>} />
+        <SectionTitle title={`近 30 天${metricLabels[metric]}趋势`} action={<div className="segmented"><button className={metric === "weight" ? "active" : ""} onClick={() => setMetric("weight")}>体重</button><button className={metric === "bodyFat" ? "active" : ""} onClick={() => setMetric("bodyFat")}>体脂率</button><button className={metric === "muscle" ? "active" : ""} onClick={() => setMetric("muscle")}>肌肉量</button></div>} />
         <div className="large-chart">
-          <ResponsiveContainer width="100%" height={320}>
-            <LineChart data={state.bodyMetrics} margin={{ top: 15, right: 22, left: -8, bottom: 8 }}>
-              <CartesianGrid stroke="#e8e6dd" vertical={false} />
-              <XAxis dataKey="date" axisLine={false} tickLine={false} />
-              <YAxis domain={["dataMin - 1", "dataMax + 1"]} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ borderRadius: 10, borderColor: "#dedaCE" }} />
-              <Line type="monotone" dataKey="weight" stroke="#3f4d31" strokeWidth={3} dot={{ r: 5, strokeWidth: 2, fill: "#fffdf8" }} />
-            </LineChart>
-          </ResponsiveContainer>
+          <TrendChart data={state.bodyMetrics} dataKey={metric} height={320} valueSuffix={metricSuffix[metric]} />
         </div>
       </Card>
       <div className="content-grid-3">
@@ -436,35 +436,53 @@ export function BodyView() {
 }
 
 export function BookingView() {
-  const { state, updateBooking } = usePortal();
+  const { state, updateBooking, notify } = usePortal();
+  const [mode, setMode] = useState<"week" | "month">("week");
+  const [courseType, setCourseType] = useState("全部课程类型");
+  const visibleBookings = state.bookings.filter((booking) => courseType === "全部课程类型" || (courseType === "私教课" ? booking.title.includes("私教") || booking.title.includes("力量") : !booking.title.includes("私教")));
+
+  function reserveNext() {
+    const available = visibleBookings.find((booking) => booking.status === "可预约");
+    if (!available) return notify("当前筛选下没有可预约课程", "info");
+    updateBooking(available.id);
+  }
+
   return (
     <div className="view-stack">
       <PageIntro eyebrow="课程预约" title="课程预约与上课课表" text="查看本周安排与教练空闲时段，合理安排训练节奏。" />
       <div className="booking-layout">
         <Card className="span-3">
           <div className="booking-toolbar">
-            <div className="segmented"><button className="active">周视图</button><button>月视图</button></div>
+            <div className="segmented"><button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}>周视图</button><button className={mode === "month" ? "active" : ""} onClick={() => setMode("month")}>月视图</button></div>
             <strong>2026 年 7 月 27 日 — 8 月 2 日</strong>
-            <div className="toolbar-actions"><select aria-label="课程类型"><option>全部课程类型</option><option>私教课</option><option>团体课</option></select><button className="button button-primary button-small"><Plus size={16} /> 预约课程</button></div>
+            <div className="toolbar-actions"><select aria-label="课程类型" value={courseType} onChange={(event) => setCourseType(event.target.value)}><option>全部课程类型</option><option>私教课</option><option>团体课</option></select><button className="button button-primary button-small" onClick={reserveNext}><Plus size={16} /> 预约课程</button></div>
           </div>
-          <div className="booking-week">
-            {state.bookings.map((booking) => (
+          {mode === "week" ? <div className="booking-week">
+            {state.bookings.map((booking) => {
+              const matchesFilter = visibleBookings.some((item) => item.id === booking.id);
+              return (
               <div className="booking-day" key={booking.id}>
                 <header><span>{booking.day}</span><b>{booking.date}</b></header>
-                <article className={`booking-slot status-${booking.status}`}>
+                <article className={`booking-slot status-${booking.status} ${matchesFilter ? "" : "is-filtered"}`}>
                   <span>{booking.time}</span><h3>{booking.title}</h3><small>{booking.coach}</small><em>{booking.status}</em>
-                  {booking.status === "可预约" || booking.status === "已预约" ? <button onClick={() => updateBooking(booking.id)}>{booking.status === "可预约" ? "立即预约" : "取消预约"}</button> : null}
+                  {matchesFilter && (booking.status === "可预约" || booking.status === "已预约") ? <button onClick={() => updateBooking(booking.id)}>{booking.status === "可预约" ? "立即预约" : "取消预约"}</button> : null}
                 </article>
               </div>
-            ))}
-          </div>
+              );
+            })}
+          </div> : <div className="booking-month" aria-label="2026 年 7 月课程月历">
+            {Array.from({ length: 35 }, (_, index) => index + 1).map((day) => {
+              const booking = state.bookings.find((item) => Number(item.date.split("/")[1]) === day);
+              return <button key={day} className={booking ? `has-class status-${booking.status}` : ""} onClick={() => booking ? notify(`${booking.date} ${booking.time} · ${booking.title}`) : undefined}><span>{day <= 31 ? day : ""}</span>{booking ? <small>{booking.title}</small> : null}</button>;
+            })}
+          </div>}
           <div className="calendar-legend"><span><i className="legend-done" /> 已完成</span><span><i className="legend-booked" /> 已预约</span><span><i className="legend-open" /> 可预约</span><span><i className="legend-wait" /> 待确认</span></div>
         </Card>
         <div className="side-stack">
           <Card className="coach-availability">
             <div className="coach-hero"><Avatar name="邵教练" size="lg" /><div><span className="eyebrow">本周安排</span><h3>邵教练</h3></div></div>
             <div className="availability"><strong>86%</strong><ProgressBar value={86} /><span>本周可约时段</span></div>
-            <button className="button button-secondary full"><CalendarCheck size={17} /> 查看完整时间表</button>
+            <button className="button button-secondary full" onClick={() => setMode("month")}><CalendarCheck size={17} /> 查看完整时间表</button>
           </Card>
           <Card>
             <SectionTitle title="我的上课统计" />
@@ -481,6 +499,7 @@ export function BookingView() {
 }
 
 export function BenefitsView() {
+  const { notify } = usePortal();
   const benefits = [
     { icon: UserRoundCheck, title: "一对一专属指导", text: "邵教练根据你的训练反馈与身体变化实时调整方案。" },
     { icon: CalendarCheck, title: "优先预约特权", text: "私教课与精品小班优先锁定，重要时段提前开放。" },
@@ -492,11 +511,11 @@ export function BenefitsView() {
   return (
     <div className="view-stack">
       <Card className="membership-hero">
-        <div><span className="eyebrow light">尊享会员 · 年度计划</span><h1>每一次进步，都有专属团队陪你完成</h1><p>有效期至 2027/07/10 · 剩余 346 天</p><button className="button button-light">查看会员协议 <ArrowRight size={17} /></button></div>
+        <div><span className="eyebrow light">尊享会员 · 年度计划</span><h1>每一次进步，都有专属团队陪你完成</h1><p>有效期至 2027/07/10 · 剩余 346 天</p><button className="button button-light" onClick={() => { window.location.href = "/terms"; }}>查看会员协议 <ArrowRight size={17} /></button></div>
         <div className="membership-mark"><Medal size={54} /><strong>VIP</strong><span>NO. 20260711028</span></div>
       </Card>
       <div className="benefit-grid">
-        {benefits.map(({ icon: Icon, title, text }) => <Card key={title} className="benefit-card"><span><Icon size={26} /></span><h3>{title}</h3><p>{text}</p><button className="text-button">了解详情 <ArrowRight size={15} /></button></Card>)}
+        {benefits.map(({ icon: Icon, title, text }) => <Card key={title} className="benefit-card"><span><Icon size={26} /></span><h3>{title}</h3><p>{text}</p><button className="text-button" onClick={() => notify(`${title}：${text}`, "info")}>了解详情 <ArrowRight size={15} /></button></Card>)}
       </div>
       <Card>
         <SectionTitle title="会员服务承诺" />

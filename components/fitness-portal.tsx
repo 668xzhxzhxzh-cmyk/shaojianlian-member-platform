@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import {
   Activity,
   Apple,
@@ -23,6 +23,7 @@ import {
   Smartphone,
   Sparkles,
   Trophy,
+  LogOut,
   UserRound,
   UsersRound,
   X,
@@ -81,11 +82,16 @@ export function FitnessPortal({ initialView }: { initialView: PortalView }) {
 }
 
 function PortalShell({ initialView }: { initialView: PortalView }) {
-  const { state, loading, toasts } = usePortal();
+  const { state, loading, toasts, notify } = usePortal();
   const initialRole: Role = initialView === "admin" ? "admin" : initialView === "coach" ? "coach" : "member";
   const [role, setRole] = useState<Role>(initialRole);
+  const [authorizedRole, setAuthorizedRole] = useState<Role | null>(null);
   const [view, setView] = useState<PortalView>(initialView);
+  const [activeNavLabel, setActiveNavLabel] = useState(
+    initialView === "admin" ? "系统总览" : initialView === "coach" ? "工作台" : memberNav.find((item) => item.view === initialView)?.label ?? "首页",
+  );
   const [profileOpen, setProfileOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [authStatus, setAuthStatus] = useState<"checking" | "demo" | "authenticated" | "unauthorized">("checking");
 
@@ -111,6 +117,22 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
         const authenticatedRole = result.user?.role;
         if (authenticatedRole && ["member", "coach", "admin"].includes(authenticatedRole)) {
           setRole(authenticatedRole);
+          setAuthorizedRole(authenticatedRole);
+          if (authenticatedRole === "member") {
+            setView((current) => ["coach", "admin"].includes(current) ? "dashboard" : current);
+            setActiveNavLabel((current) => ["系统总览", "工作台"].includes(current) ? "首页" : current);
+            if (["/coach", "/admin"].includes(window.location.pathname)) window.history.replaceState({}, "", "/");
+          }
+          if (authenticatedRole === "coach") {
+            setView("coach");
+            setActiveNavLabel("工作台");
+            if (window.location.pathname !== "/coach") window.history.replaceState({}, "", "/coach");
+          }
+          if (authenticatedRole === "admin") {
+            setView("admin");
+            setActiveNavLabel("系统总览");
+            if (window.location.pathname !== "/admin") window.history.replaceState({}, "", "/admin");
+          }
           setAuthStatus("authenticated");
         } else {
           setAuthStatus("demo");
@@ -123,7 +145,10 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
     function handlePopState() {
       const route = window.location.pathname.replace("/", "") || "dashboard";
       const known = [...memberNav, ...coachNav, ...adminNav].find((item) => item.href === `/${route}` || (route === "dashboard" && item.href === "/"));
-      if (known) setView(known.view as PortalView);
+      if (known) {
+        setView(known.view as PortalView);
+        setActiveNavLabel(known.label);
+      }
     }
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -132,33 +157,50 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
   if (authStatus === "unauthorized") {
     return <LoginScreen onSuccess={(userRole) => {
       setRole(userRole);
+      setAuthorizedRole(userRole);
       setAuthStatus("authenticated");
-      if (userRole === "member") { setView("dashboard"); window.history.replaceState({}, "", "/"); }
-      if (userRole === "coach") { setView("coach"); window.history.replaceState({}, "", "/coach"); }
-      if (userRole === "admin") { setView("admin"); window.history.replaceState({}, "", "/admin"); }
+      if (userRole === "member") { setView("dashboard"); setActiveNavLabel("首页"); window.history.replaceState({}, "", "/"); }
+      if (userRole === "coach") { setView("coach"); setActiveNavLabel("工作台"); window.history.replaceState({}, "", "/coach"); }
+      if (userRole === "admin") { setView("admin"); setActiveNavLabel("系统总览"); window.history.replaceState({}, "", "/admin"); }
     }} />;
   }
 
-  function goTo(next: string, href?: string) {
+  function goTo(next: string, href?: string, label?: string) {
     const nextView = next as PortalView;
+    const resolvedLabel = label ?? navigation.find((item) => item.view === nextView)?.label ?? memberNav.find((item) => item.view === nextView)?.label;
+    if (resolvedLabel) setActiveNavLabel(resolvedLabel);
     setView(nextView);
-    if (nextView === "coach") setRole("coach");
-    if (nextView === "admin") setRole("admin");
+    if (authStatus === "demo" && nextView === "coach") setRole("coach");
+    if (authStatus === "demo" && nextView === "admin") setRole("admin");
     const resolvedHref = href ?? [...memberNav, ...coachNav, ...adminNav].find((item) => item.view === nextView)?.href ?? "/";
     if (window.location.pathname !== resolvedHref) window.history.pushState({}, "", resolvedHref);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo(0, 0);
     setMobileOpen(false);
   }
 
   function switchRole(nextRole: Role) {
+    if (authStatus === "authenticated" && authorizedRole !== nextRole) {
+      notify("当前账号没有该角色权限", "warning");
+      return;
+    }
     setRole(nextRole);
     setProfileOpen(false);
-    if (nextRole === "member") goTo("dashboard", "/");
-    if (nextRole === "coach") goTo("coach", "/coach");
-    if (nextRole === "admin") goTo("admin", "/admin");
+    if (nextRole === "member") goTo("dashboard", "/", "首页");
+    if (nextRole === "coach") goTo("coach", "/coach", "工作台");
+    if (nextRole === "admin") goTo("admin", "/admin", "系统总览");
   }
 
-  const viewContent = useMemo(() => {
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } finally {
+      setProfileOpen(false);
+      setAuthorizedRole(null);
+      setAuthStatus("unauthorized");
+    }
+  }
+
+  const viewContent = (() => {
     switch (view) {
       case "training": return <TrainingView />;
       case "nutrition": return <NutritionView />;
@@ -171,7 +213,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
       case "admin": return <AdminView />;
       default: return <DashboardView goTo={goTo} />;
     }
-  }, [view]);
+  })();
 
   return (
     <div className={`portal ${management ? "portal-management" : "portal-member"}`}>
@@ -183,19 +225,28 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
         </button>
         {!management ? (
           <nav className="desktop-top-nav" aria-label="主导航">
-            {memberNav.map(({ view: itemView, label, href }) => <a key={itemView} href={href} className={view === itemView ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href); }}>{label}</a>)}
+            {memberNav.map(({ view: itemView, label, href }) => <a key={itemView} href={href} className={activeNavLabel === label ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href, label); }}>{label}</a>)}
           </nav>
         ) : null}
         <div className="topbar-actions">
-          <button className="icon-button notification-button" aria-label="通知"><Bell size={20} /><i>5</i></button>
+          <div className="notification-menu">
+            <button className={`icon-button notification-button ${notificationOpen ? "active" : ""}`} onClick={() => { setNotificationOpen((open) => !open); setProfileOpen(false); }} aria-label="通知" aria-expanded={notificationOpen}><Bell size={20} /><i>5</i></button>
+            {notificationOpen ? <div className="notification-popover">
+              <div className="row-between"><b>消息通知</b><button className="text-button" onClick={() => notify("全部通知已标为已读")}>全部已读</button></div>
+              <button onClick={() => { setNotificationOpen(false); goTo("booking", "/booking"); }}><CalendarDays size={18} /><span><b>课程待确认</b><small>明天 14:00 功能训练等待确认</small></span><em>刚刚</em></button>
+              <button onClick={() => { setNotificationOpen(false); goTo("assistant", "/assistant"); }}><Sparkles size={18} /><span><b>Hermes 建议待处理</b><small>李明减脂专项建议已生成</small></span><em>8 分钟</em></button>
+              <button onClick={() => { setNotificationOpen(false); goTo("body", "/body"); }}><Activity size={18} /><span><b>身体数据已更新</b><small>最新体重 67.9 kg</small></span><em>今天</em></button>
+            </div> : null}
+          </div>
           <div className="profile-menu">
-            <button className="profile-trigger" onClick={() => setProfileOpen((open) => !open)}><Avatar name={role === "member" ? state.profile.name : "邵教练"} /><span><b>{role === "member" ? state.profile.name : "邵教练"}</b><small>{role === "member" ? "尊享会员" : role === "coach" ? "主教练" : "超级管理员"}</small></span><ChevronDown size={16} /></button>
+            <button className="profile-trigger" onClick={() => { setProfileOpen((open) => !open); setNotificationOpen(false); }} aria-expanded={profileOpen}><Avatar name={role === "member" ? state.profile.name : "邵教练"} /><span><b>{role === "member" ? state.profile.name : "邵教练"}</b><small>{role === "member" ? "尊享会员" : role === "coach" ? "主教练" : "超级管理员"}</small></span><ChevronDown size={16} /></button>
             {profileOpen ? (
               <div className="profile-popover">
-                <span className="eyebrow">切换演示角色</span>
-                <button className={role === "member" ? "active" : ""} onClick={() => switchRole("member")}><UserRound size={17} /> 会员端{role === "member" ? <CheckCircle2 size={15} /> : null}</button>
-                <button className={role === "coach" ? "active" : ""} onClick={() => switchRole("coach")}><Dumbbell size={17} /> 教练端{role === "coach" ? <CheckCircle2 size={15} /> : null}</button>
-                <button className={role === "admin" ? "active" : ""} onClick={() => switchRole("admin")}><ShieldCheck size={17} /> 管理端{role === "admin" ? <CheckCircle2 size={15} /> : null}</button>
+                <span className="eyebrow">{authStatus === "demo" ? "切换演示角色" : "当前账号"}</span>
+                {(authStatus === "demo" || authorizedRole === "member") ? <button className={role === "member" ? "active" : ""} onClick={() => switchRole("member")}><UserRound size={17} /> 会员端{role === "member" ? <CheckCircle2 size={15} /> : null}</button> : null}
+                {(authStatus === "demo" || authorizedRole === "coach") ? <button className={role === "coach" ? "active" : ""} onClick={() => switchRole("coach")}><Dumbbell size={17} /> 教练端{role === "coach" ? <CheckCircle2 size={15} /> : null}</button> : null}
+                {(authStatus === "demo" || authorizedRole === "admin") ? <button className={role === "admin" ? "active" : ""} onClick={() => switchRole("admin")}><ShieldCheck size={17} /> 管理端{role === "admin" ? <CheckCircle2 size={15} /> : null}</button> : null}
+                {authStatus === "authenticated" ? <button className="logout-button" onClick={logout}><LogOut size={17} /> 退出登录</button> : null}
               </div>
             ) : null}
           </div>
@@ -205,7 +256,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
       {management ? (
         <aside className="sidebar">
           <nav aria-label="管理导航">
-            {navigation.map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-${index}`} href={href} className={view === itemView && (index === 0 || itemView !== navigation[index - 1]?.view) ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href); }}><Icon size={18} />{label}{label.includes("AI") ? <em>8</em> : null}</a>)}
+            {navigation.map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-${index}`} href={href} className={activeNavLabel === label ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href, label); }}><Icon size={18} />{label}{label.includes("AI") ? <em>8</em> : null}</a>)}
           </nav>
           <div className="sidebar-profile"><Avatar name="邵教练" size="lg" /><div><b>邵教练</b><small>私人健身教练 · 武汉</small></div><button className="button button-primary full" onClick={() => switchRole("member")}>查看会员端</button></div>
         </aside>
@@ -218,7 +269,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
       </main>
 
       <nav className="mobile-bottom-nav" aria-label="移动端导航">
-        {navigation.slice(0, 5).map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-${index}`} href={href} className={view === itemView ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href); }}><Icon size={20} /><span>{label.length > 4 ? label.slice(0, 4) : label}</span></a>)}
+        {navigation.slice(0, 5).map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-${index}`} href={href} className={activeNavLabel === label ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href, label); }}><Icon size={20} /><span>{label.length > 4 ? label.slice(0, 4) : label}</span></a>)}
         <button onClick={() => setMobileOpen(true)}><Menu size={20} /><span>更多</span></button>
       </nav>
 
@@ -227,8 +278,8 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
           <aside className="mobile-drawer" onMouseDown={(event) => event.stopPropagation()}>
             <div className="row-between"><div className="brand"><span className="brand-mark"><Activity size={22} /></span><b>功能导航</b></div><button className="icon-button" onClick={() => setMobileOpen(false)} aria-label="关闭"><X size={20} /></button></div>
             <p>{formatShanghaiDate()}</p>
-            <nav>{navigation.map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-drawer-${index}`} href={href} className={view === itemView ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href); }}><Icon size={19} />{label}</a>)}</nav>
-            <div className="role-switch-mobile"><span>切换角色</span><button onClick={() => switchRole("member")} className={role === "member" ? "active" : ""}>会员</button><button onClick={() => switchRole("coach")} className={role === "coach" ? "active" : ""}>教练</button><button onClick={() => switchRole("admin")} className={role === "admin" ? "active" : ""}>管理</button></div>
+            <nav>{navigation.map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-drawer-${index}`} href={href} className={activeNavLabel === label ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href, label); }}><Icon size={19} />{label}</a>)}</nav>
+            {authStatus === "demo" ? <div className="role-switch-mobile"><span>切换演示角色</span><button onClick={() => switchRole("member")} className={role === "member" ? "active" : ""}>会员</button><button onClick={() => switchRole("coach")} className={role === "coach" ? "active" : ""}>教练</button><button onClick={() => switchRole("admin")} className={role === "admin" ? "active" : ""}>管理</button></div> : null}
           </aside>
         </div>
       ) : null}

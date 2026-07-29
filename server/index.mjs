@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import pg from "pg";
@@ -11,6 +11,7 @@ const sessionSecret = new TextEncoder().encode(
   process.env.SESSION_SECRET || "replace-this-before-production",
 );
 const allowedOrigin = process.env.ALLOWED_ORIGIN || "";
+const cookieSecure = String(process.env.COOKIE_SECURE || "true").toLowerCase() !== "false";
 
 const seedState = {
   profile: { id: "member-li", name: "李明", phone: "138****5206", plan: "尊享会员 · 年度计划", expiresAt: "2027/07/10", coach: "邵教练", level: "VIP" },
@@ -59,10 +60,18 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
   try {
-    if (url.pathname === "/health") return json(response, 200, { ok: true, region: "wuhan", time: new Date().toISOString() });
+    if (url.pathname === "/health") return json(response, 200, {
+      ok: true,
+      region: "wuhan",
+      time: new Date().toISOString(),
+      integrations: {
+        deepseek: Boolean(process.env.DEEPSEEK_API_KEY),
+        weixin: Boolean(process.env.OPENCLAW_GATEWAY_URL && process.env.OPENCLAW_GATEWAY_TOKEN),
+      },
+    });
     if (url.pathname === "/api/auth/login" && request.method === "POST") return login(request, response);
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
-      response.setHeader("set-cookie", "shao_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
+      response.setHeader("set-cookie", `shao_session=; Path=/; HttpOnly; ${cookieSecure ? "Secure; " : ""}SameSite=Strict; Max-Age=0`);
       return json(response, 200, { ok: true });
     }
     const session = await readSession(request);
@@ -74,8 +83,14 @@ const server = createServer(async (request, response) => {
       const state = await readPortalState(session);
       return json(response, 200, { state });
     }
+    if (url.pathname === "/api/users" && request.method === "GET") return listUsers(response, session);
+    if (url.pathname === "/api/users" && request.method === "POST") return createUser(request, response, session);
     if (url.pathname === "/api/actions" && request.method === "POST") return handleAction(request, response, session);
     if (url.pathname === "/api/agent/chat" && request.method === "POST") return handleHermes(request, response, session);
+    if (url.pathname === "/api/notifications/weixin" && request.method === "POST") {
+      if (!["coach", "admin"].includes(session.role)) return json(response, 403, { error: "仅教练可发送会员消息" });
+      return handleWeixin(request, response, session);
+    }
     if (url.pathname === "/api/notifications/wecom" && request.method === "POST") {
       if (!["coach", "admin"].includes(session.role)) return json(response, 403, { error: "仅教练可发送会员消息" });
       return handleWecom(request, response, session);
@@ -143,7 +158,7 @@ async function login(request, response) {
   }
   const token = await new SignJWT({ role: user.role, name: user.name })
     .setProtectedHeader({ alg: "HS256" }).setSubject(user.id).setIssuedAt().setExpirationTime("12h").sign(sessionSecret);
-  response.setHeader("set-cookie", `shao_session=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200`);
+  response.setHeader("set-cookie", `shao_session=${token}; Path=/; HttpOnly; ${cookieSecure ? "Secure; " : ""}SameSite=Strict; Max-Age=43200`);
   return json(response, 200, { user: { id: user.id, name: user.name, role: user.role } });
 }
 
@@ -167,6 +182,46 @@ async function readPortalState(session) {
 
 async function writePortalState(userId, state) {
   await pool.query("INSERT INTO portal_state (user_id,state_json,updated_at) VALUES ($1,$2,NOW()) ON CONFLICT (user_id) DO UPDATE SET state_json=EXCLUDED.state_json,updated_at=NOW()", [userId, state]);
+}
+
+async function listUsers(response, session) {
+  if (!["coach", "admin"].includes(session.role)) return json(response, 403, { error: "没有用户管理权限" });
+  const result = await pool.query("SELECT id,name,phone,role,status,created_at FROM users ORDER BY created_at ASC LIMIT 500");
+  return json(response, 200, {
+    users: result.rows.map((user) => ({
+      ...user,
+      phone: String(user.phone).replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2"),
+    })),
+  });
+}
+
+async function createUser(request, response, session) {
+  if (!["coach", "admin"].includes(session.role)) return json(response, 403, { error: "没有用户管理权限" });
+  const body = await readJson(request);
+  const name = String(body.name || "").trim().slice(0, 30);
+  const phone = String(body.phone || "").replace(/\s/g, "");
+  const requestedRole = String(body.role || "member");
+  const role = session.role === "admin" && ["member", "coach", "admin"].includes(requestedRole) ? requestedRole : "member";
+  if (name.length < 2 || !/^1\d{10}$/.test(phone)) return json(response, 400, { error: "姓名或手机号格式不正确" });
+  const temporaryPassword = `Shao@${randomBytes(5).toString("hex")}`;
+  const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+  const id = `${role}-${randomUUID()}`;
+  try {
+    await pool.query(
+      "INSERT INTO users (id,phone,name,role,password_hash,status) VALUES ($1,$2,$3,$4,$5,'active')",
+      [id, phone, name, role, passwordHash],
+    );
+    if (role === "member") {
+      const memberState = structuredClone(seedState);
+      memberState.profile = { ...memberState.profile, id, name, phone: phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2") };
+      await pool.query("INSERT INTO portal_state (user_id,state_json) VALUES ($1,$2)", [id, memberState]);
+    }
+    await audit(session.id, "user_create", { id, role });
+    return json(response, 201, { user: { id, name, role }, temporaryPassword });
+  } catch (error) {
+    if (error?.code === "23505") return json(response, 409, { error: "该手机号已存在" });
+    throw error;
+  }
 }
 
 async function handleAction(request, response, session) {
@@ -259,6 +314,78 @@ async function handleWecom(request, response, session) {
   const sent = upstream.ok && result.errcode === 0;
   await pool.query("INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'wecom',$4,$5,$6,$7)", [id, session.id, member, title, content, sent ? "sent" : "failed", result.errmsg || null]);
   return sent ? json(response, 200, { sent: true, channel: "wecom" }) : json(response, 502, { sent: false, error: result.errmsg || "企业微信发送失败" });
+}
+
+async function handleWeixin(request, response, session) {
+  const body = await readJson(request);
+  const member = String(body.member || "").slice(0, 40);
+  const title = String(body.title || "").slice(0, 80);
+  const content = String(body.content || "").slice(0, 1800);
+  if (!member || !title || !content) return json(response, 400, { error: "消息内容不完整" });
+
+  const id = randomUUID();
+  const gatewayValue = process.env.OPENCLAW_GATEWAY_URL;
+  const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
+  const target = process.env.WEIXIN_TARGET_ID;
+  if (!gatewayValue || !gatewayToken || !target) {
+    await pool.query(
+      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'openclaw-weixin',$4,$5,'queued',$6)",
+      [id, session.id, member, title, content, !gatewayValue || !gatewayToken ? "微信通道尚未启动" : "等待会员建立微信会话"],
+    );
+    return json(response, 202, { sent: false, configured: Boolean(gatewayValue && gatewayToken), queued: true, channel: "openclaw-weixin" });
+  }
+
+  let gateway;
+  try {
+    gateway = new URL(gatewayValue);
+  } catch {
+    return json(response, 500, { error: "微信网关地址无效" });
+  }
+  const allowedHosts = new Set(["127.0.0.1", "localhost", "host.docker.internal"]);
+  if (!["http:", "https:"].includes(gateway.protocol) || !allowedHosts.has(gateway.hostname)) {
+    return json(response, 500, { error: "微信网关必须使用服务器私有回环地址" });
+  }
+
+  const message = `【${title}】\n会员：${member}\n${content}\n\n— Hermes 整理，邵教练确认`;
+  try {
+    const upstream = await fetch(new URL("/tools/invoke", gateway), {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${gatewayToken}`,
+        "content-type": "application/json",
+        "x-openclaw-message-channel": "openclaw-weixin",
+        "x-openclaw-message-to": target,
+        ...(process.env.WEIXIN_ACCOUNT_ID ? { "x-openclaw-account-id": process.env.WEIXIN_ACCOUNT_ID } : {}),
+      },
+      body: JSON.stringify({
+        tool: "message",
+        action: "send",
+        args: {
+          channel: "openclaw-weixin",
+          target,
+          message,
+          ...(process.env.WEIXIN_ACCOUNT_ID ? { account: process.env.WEIXIN_ACCOUNT_ID } : {}),
+        },
+        idempotencyKey: id,
+      }),
+    });
+    const result = await upstream.json().catch(() => ({}));
+    const sent = upstream.ok && result.ok !== false;
+    await pool.query(
+      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'openclaw-weixin',$4,$5,$6,$7)",
+      [id, session.id, member, title, content, sent ? "sent" : "failed", sent ? "腾讯微信通道已接收" : String(result.error?.message || "微信发送失败").slice(0, 300)],
+    );
+    await audit(session.id, "weixin_send", { member, title, sent });
+    return sent
+      ? json(response, 200, { sent: true, channel: "openclaw-weixin" })
+      : json(response, 502, { sent: false, error: result.error?.message || "微信发送失败" });
+  } catch (error) {
+    await pool.query(
+      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'openclaw-weixin',$4,$5,'failed',$6)",
+      [id, session.id, member, title, content, error instanceof Error ? error.message.slice(0, 300) : "微信网关不可用"],
+    );
+    return json(response, 502, { sent: false, error: "微信网关暂时不可用" });
+  }
 }
 
 async function audit(actorId, action, detail) {

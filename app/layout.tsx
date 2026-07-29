@@ -2,9 +2,6 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://coach-shao.example.com",
-  ),
   title: {
     default: "邵教练专属会员平台",
     template: "%s｜邵教练专属会员平台",

@@ -17,20 +17,10 @@ import {
   RefreshCcw,
   Send,
   ShieldAlert,
-  Sparkles,
   Utensils,
 } from "lucide-react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { usePortal } from "./portal-context";
-import { Avatar, Card, SectionTitle } from "./ui";
+import { Avatar, Card, SectionTitle, TrendChart } from "./ui";
 
 type ChatMessage = { role: "coach" | "assistant"; content: string; time: string };
 
@@ -51,6 +41,10 @@ export function AssistantView() {
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [memberOpen, setMemberOpen] = useState(false);
+  const [selectedMember, setSelectedMember] = useState("李明");
+  const [editing, setEditing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const suggestion = state.suggestions[0];
 
@@ -107,22 +101,27 @@ export function AssistantView() {
     }
   }
 
-  function usePrompt(prompt: string) {
+  function choosePrompt(prompt: string) {
     setInput(prompt);
     window.setTimeout(() => document.getElementById("hermes-input")?.focus(), 20);
+  }
+
+  function regenerate() {
+    choosePrompt(`重新分析${selectedMember}最近 7 天的训练、恢复和饮食数据，并生成一份更精炼的建议草稿。`);
+    notify("已准备重新生成指令，确认后发送给 Hermes", "info");
   }
 
   async function confirmAndSend() {
     updateSuggestion(suggestion.id, "已发送");
     try {
-      const response = await fetch("/api/notifications/wecom", {
+      const response = await fetch("/api/notifications/weixin", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ member: suggestion.member, title: suggestion.title, content: suggestion.content }),
       });
-      const result = await response.json() as { sent?: boolean };
-      if (result.sent) notify("Hermes 已通过企业微信机器人发送");
-      else notify("建议已确认；配置企业微信 Webhook 后将自动推送", "info");
+      const result = await response.json() as { sent?: boolean; channel?: string; queued?: boolean };
+      if (result.sent) notify("Hermes 已通过微信机器人发送");
+      else notify("建议已确认；微信扫码并建立会话后会自动推送", "info");
     } catch {
       notify("建议已确认并进入待推送队列", "info");
     }
@@ -145,7 +144,8 @@ export function AssistantView() {
 
       <div className="assistant-grid">
         <Card className="chat-panel">
-          <div className="chat-heading"><div><MessageCircleMore size={20} /><b>与 Hermes 对话</b></div><button className="icon-button" aria-label="历史记录"><History size={18} /></button></div>
+          <div className="chat-heading"><div><MessageCircleMore size={20} /><b>与 Hermes 对话</b></div><button className={`icon-button ${historyOpen ? "active" : ""}`} onClick={() => setHistoryOpen((open) => !open)} aria-label="历史记录"><History size={18} /></button></div>
+          {historyOpen ? <div className="chat-history"><b>最近对话</b><button onClick={() => { setHistoryOpen(false); notify("已打开今天 10:32 的恢复分析"); }}>今天 10:32 · 李明恢复分析</button><button onClick={() => { setHistoryOpen(false); notify("已打开 7 月 27 日的饮食复盘"); }}>7 月 27 日 · 饮食执行复盘</button></div> : null}
           <div className="chat-messages">
             {messages.map((message, index) => (
               <div className={`chat-message ${message.role}`} key={`${message.time}-${index}`}>
@@ -156,7 +156,7 @@ export function AssistantView() {
           </div>
           <div className="quick-prompts">
             <span>快捷指令</span>
-            <div>{quickPrompts.map((prompt) => <button key={prompt} onClick={() => usePrompt(prompt)}>{prompt}</button>)}</div>
+            <div>{quickPrompts.map((prompt) => <button key={prompt} onClick={() => choosePrompt(prompt)}>{prompt}</button>)}</div>
           </div>
           <form className="chat-input" onSubmit={askHermes}>
             <textarea id="hermes-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入你希望 Hermes 分析的问题或任务…" rows={3} />
@@ -168,28 +168,29 @@ export function AssistantView() {
         <div className="suggestion-column">
           <Card className="member-selector">
             <SectionTitle title="选择会员" />
-            <button><Avatar name="李明" /><span><b>李明 <em>VIP</em></b><small>28 岁 · 178cm / 72kg</small></span><ChevronDown size={18} /></button>
+            <button onClick={() => setMemberOpen((open) => !open)} aria-expanded={memberOpen}><Avatar name={selectedMember} /><span><b>{selectedMember} <em>VIP</em></b><small>28 岁 · 178cm / 72kg</small></span><ChevronDown size={18} /></button>
+            {memberOpen ? <div className="member-options">{["李明", "王芳", "张伟"].map((member) => <button key={member} onClick={() => { setSelectedMember(member); setMemberOpen(false); notify(`已切换到会员 ${member}`); }}><Avatar name={member} size="sm" />{member}<small>{member === "李明" ? "减脂专项" : member === "王芳" ? "体态改善" : "增肌专项"}</small></button>)}</div> : null}
             <div><span>本周训练<b>4 / 5 次</b></span><span>恢复评分<b>68 分</b></span><span>最近训练<b>7 月 28 日</b></span></div>
           </Card>
           <Card>
             <div className="suggestion-heading">
-              <div><span className="eyebrow">AI 草稿 · 待邵教练确认</span><h2>为李明生成的个性化建议</h2></div>
-              <div><button className="button button-secondary button-small"><RefreshCcw size={15} /> 重新生成</button><button className="button button-secondary button-small"><FileText size={15} /> 保存草稿</button></div>
+              <div><span className="eyebrow">AI 草稿 · 待邵教练确认</span><h2>为{selectedMember}生成的个性化建议</h2></div>
+              <div><button className="button button-secondary button-small" onClick={regenerate}><RefreshCcw size={15} /> 重新生成</button><button className="button button-secondary button-small" onClick={() => updateSuggestion(suggestion.id, "草稿")}><FileText size={15} /> 保存草稿</button></div>
             </div>
-            <div className="recommendation-list">
-              <Recommendation icon={Dumbbell} title="训练调整" text="近 7 天肩部疲劳度偏高，建议下调上肢推举动作强度 10–15%，重点进行肩袖稳定与灵活性训练。" source="训练记录 · 身体数据" />
-              <Recommendation icon={Utensils} title="饮食建议" text="优质蛋白日摄入建议维持 1.6–1.8 g/kg，增加深色蔬菜与抗炎食物，减少高糖高油饮品。" source="饮食记录 · 身体数据" />
-              <Recommendation icon={MoonStar} title="恢复提醒" text="最近睡眠 6.2 小时，建议保证 7–8 小时睡眠；睡前进行 10 分钟呼吸与肩部放松。" source="身体数据 · 打卡记录" />
-              <Recommendation icon={ShieldAlert} title="风险提示" text="肩部酸痛持续较多，若出现夜间痛或活动受限，应暂停相关负荷并及时咨询专业医务人员。" source="沟通记录 · 风险规则" />
-              <Recommendation icon={ClipboardCheck} title="跟进任务" text="安排一次肩部放松与动作评估；下周训练前复测恢复评分，并根据结果调整计划。" source="沟通记录" />
+            <div className={`recommendation-list ${editing ? "is-editing" : ""}`}>
+              <Recommendation icon={Dumbbell} title="训练调整" text="近 7 天肩部疲劳度偏高，建议下调上肢推举动作强度 10–15%，重点进行肩袖稳定与灵活性训练。" source="训练记录 · 身体数据" editing={editing} onEdit={() => setEditing(true)} />
+              <Recommendation icon={Utensils} title="饮食建议" text="优质蛋白日摄入建议维持 1.6–1.8 g/kg，增加深色蔬菜与抗炎食物，减少高糖高油饮品。" source="饮食记录 · 身体数据" editing={editing} onEdit={() => setEditing(true)} />
+              <Recommendation icon={MoonStar} title="恢复提醒" text="最近睡眠 6.2 小时，建议保证 7–8 小时睡眠；睡前进行 10 分钟呼吸与肩部放松。" source="身体数据 · 打卡记录" editing={editing} onEdit={() => setEditing(true)} />
+              <Recommendation icon={ShieldAlert} title="风险提示" text="肩部酸痛持续较多，若出现夜间痛或活动受限，应暂停相关负荷并及时咨询专业医务人员。" source="沟通记录 · 风险规则" editing={editing} onEdit={() => setEditing(true)} />
+              <Recommendation icon={ClipboardCheck} title="跟进任务" text="安排一次肩部放松与动作评估；下周训练前复测恢复评分，并根据结果调整计划。" source="沟通记录" editing={editing} onEdit={() => setEditing(true)} />
             </div>
-            <div className="suggestion-actions"><button className="button button-secondary"><Edit3 size={17} /> 修改建议</button><button className="button button-primary" onClick={confirmAndSend}><Send size={17} /> 确认并交给 Hermes 推送</button></div>
+            <div className="suggestion-actions"><button className="button button-secondary" onClick={() => { setEditing((value) => !value); if (editing) notify("修改已保存到草稿"); }}><Edit3 size={17} /> {editing ? "完成修改" : "修改建议"}</button><button className="button button-primary" onClick={confirmAndSend}><Send size={17} /> 确认并交给 Hermes 推送</button></div>
           </Card>
         </div>
 
         <div className="evidence-column">
           <Card>
-            <SectionTitle title="会员证据概览" action={<button className="text-button">查看全部</button>} />
+            <SectionTitle title="会员证据概览" action={<button className="text-button" onClick={() => notify("已汇总训练、身体、打卡和沟通四类证据", "info")}>查看全部</button>} />
             <div className="evidence-list"><Evidence icon={Dumbbell} label="训练记录" value="本周 4 / 5 次 · 负荷 1,820 kcal" /><Evidence icon={Activity} label="身体数据" value="体重 67.9 kg · 体脂 14.2%" /><Evidence icon={MoonStar} label="打卡记录" value="睡眠 6.2h · 恢复评分 68" /><Evidence icon={MessageCircleMore} label="沟通记录" value="肩部酸痛（训练中出现）" /></div>
           </Card>
           <Card>
@@ -207,8 +208,8 @@ export function AssistantView() {
   );
 }
 
-function Recommendation({ icon: Icon, title, text, source }: { icon: typeof Dumbbell; title: string; text: string; source: string }) {
-  return <article><span><Icon size={22} /></span><div><h3>{title}<em>可编辑</em></h3><p>{text}</p></div><small>数据来源：{source}</small><button className="text-button"><Edit3 size={14} /> 编辑建议</button></article>;
+function Recommendation({ icon: Icon, title, text, source, editing, onEdit }: { icon: typeof Dumbbell; title: string; text: string; source: string; editing: boolean; onEdit: () => void }) {
+  return <article><span><Icon size={22} /></span><div><h3>{title}<em>可编辑</em></h3>{editing ? <textarea aria-label={`编辑${title}`} defaultValue={text} rows={3} /> : <p>{text}</p>}</div><small>数据来源：{source}</small><button className="text-button" onClick={onEdit}><Edit3 size={14} /> 编辑建议</button></article>;
 }
 
 function Evidence({ icon: Icon, label, value }: { icon: typeof Dumbbell; label: string; value: string }) {
@@ -217,7 +218,7 @@ function Evidence({ icon: Icon, label, value }: { icon: typeof Dumbbell; label: 
 
 function MiniTrend({ title, data, dataKey }: { title: string; data: Record<string, unknown>[]; dataKey: string }) {
   return (
-    <div className="mini-trend"><div className="row-between"><b>{title}</b><small>平均趋势</small></div><ResponsiveContainer width="100%" height={88}><LineChart data={data} margin={{ top: 6, right: 4, left: 4, bottom: 0 }}><CartesianGrid vertical={false} stroke="#ece9df" /><XAxis dataKey="date" hide /><YAxis hide domain={["dataMin - 1", "dataMax + 1"]} /><Tooltip /><Line type="monotone" dataKey={dataKey} stroke="#3f4d31" strokeWidth={2} dot={{ r: 2.5 }} /></LineChart></ResponsiveContainer></div>
+    <div className="mini-trend"><div className="row-between"><b>{title}</b><small>平均趋势</small></div><TrendChart data={data} dataKey={dataKey} height={88} compact /></div>
   );
 }
 
