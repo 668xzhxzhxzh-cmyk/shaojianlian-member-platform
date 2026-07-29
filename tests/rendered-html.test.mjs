@@ -40,3 +40,17 @@ test("keeps mainland deployment and secret configuration documented", async () =
   assert.match(compose, /Asia\/Shanghai/);
   assert.match(readme, /ICP\s*备案/);
 });
+
+test("supports safe member self-registration and automatic sign-in", async () => {
+  const [server, portal] = await Promise.all([
+    readFile(new URL("../server/index.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(server, /\/api\/auth\/register/);
+  assert.match(server, /role,password_hash,status\) VALUES \(\$1,\$2,\$3,'member'/);
+  assert.match(server, /self_register/);
+  assert.match(server, /issueSession\(response, \{ id, name, role: "member" \}, 201\)/);
+  assert.match(portal, /还没有账号？立即注册/);
+  assert.match(portal, /注册并进入平台/);
+  assert.match(portal, /用户协议/);
+});

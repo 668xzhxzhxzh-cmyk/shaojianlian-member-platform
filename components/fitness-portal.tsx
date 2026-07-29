@@ -292,8 +292,10 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
 }
 
 function LoginScreen({ onSuccess }: { onSuccess: (role: Role) => void }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const registering = mode === "register";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -301,20 +303,35 @@ function LoginScreen({ onSuccess }: { onSuccess: (role: Role) => void }) {
     setBusy(true);
     const data = new FormData(event.currentTarget);
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch(registering ? "/api/auth/register" : "/api/auth/login", {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ phone: data.get("phone"), password: data.get("password") }),
+        body: JSON.stringify(registering ? {
+          name: data.get("name"),
+          phone: data.get("phone"),
+          password: data.get("password"),
+          confirmPassword: data.get("confirmPassword"),
+          acceptedTerms: data.get("acceptedTerms") === "on",
+        } : {
+          phone: data.get("phone"),
+          password: data.get("password"),
+        }),
       });
       const result = await response.json() as { user?: { role?: Role }; error?: string };
-      if (!response.ok || !result.user?.role) throw new Error(result.error ?? "登录失败");
+      if (!response.ok || !result.user?.role) throw new Error(result.error ?? (registering ? "注册失败" : "登录失败"));
       onSuccess(result.user.role);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "登录失败，请稍后再试");
+      setError(reason instanceof Error ? reason.message : `${registering ? "注册" : "登录"}失败，请稍后再试`);
     } finally {
       setBusy(false);
     }
+  }
+
+  function switchMode(nextMode: "login" | "register") {
+    if (busy) return;
+    setMode(nextMode);
+    setError("");
   }
 
   return (
@@ -322,16 +339,26 @@ function LoginScreen({ onSuccess }: { onSuccess: (role: Role) => void }) {
       <section className="login-brand-panel">
         <div className="brand login-brand"><span className="brand-mark"><Activity size={25} /></span><span><b>邵教练专属会员平台</b><small>武汉 · 一对一科学训练</small></span></div>
         <div><span className="eyebrow light">专属训练 · 长期主义</span><h1>把每一次训练，变成看得见的进步。</h1><p>训练、饮食、恢复、预约与 Hermes 智能助理，都在一个安全的会员空间里。</p></div>
-        <div className="login-trust"><span><ShieldCheck size={18} /> 分角色数据访问</span><span><LockKeyhole size={18} /> 全程 HTTPS 加密</span><span><Bot size={18} /> 教练确认后再推送</span></div>
+        <div className="login-trust"><span><ShieldCheck size={18} /> 分角色数据访问</span><span><LockKeyhole size={18} /> 密码安全加密存储</span><span><Bot size={18} /> 教练确认后再推送</span></div>
       </section>
       <section className="login-form-panel">
-        <form className="login-form" onSubmit={submit}>
-          <span className="eyebrow">会员登录</span><h2>欢迎回来</h2><p>使用邵教练为你开通的手机号与密码登录。</p>
+        <form className="login-form" onSubmit={submit} key={mode}>
+          <div className="login-mode-switch" role="tablist" aria-label="登录或注册">
+            <button type="button" role="tab" aria-selected={!registering} className={!registering ? "active" : ""} onClick={() => switchMode("login")}>登录</button>
+            <button type="button" role="tab" aria-selected={registering} className={registering ? "active" : ""} onClick={() => switchMode("register")}>注册</button>
+          </div>
+          <span className="eyebrow">{registering ? "会员注册" : "会员登录"}</span>
+          <h2>{registering ? "创建会员账号" : "欢迎回来"}</h2>
+          <p>{registering ? "使用中国内地手机号注册，完成后将自动登录。" : "使用手机号与密码登录你的专属会员空间。"}</p>
+          {registering ? <label><span>姓名</span><div><UserRound size={18} /><input name="name" autoComplete="name" placeholder="请输入真实姓名" minLength={2} maxLength={30} required /></div></label> : null}
           <label><span>手机号</span><div><Smartphone size={18} /><input name="phone" inputMode="numeric" autoComplete="username" placeholder="请输入 11 位手机号" pattern="1[0-9]{10}" required /></div></label>
-          <label><span>密码</span><div><LockKeyhole size={18} /><input name="password" type="password" autoComplete="current-password" placeholder="请输入登录密码" minLength={8} required /></div></label>
+          <label><span>密码</span><div><LockKeyhole size={18} /><input name="password" type="password" autoComplete={registering ? "new-password" : "current-password"} placeholder={registering ? "至少 8 位，包含字母和数字" : "请输入登录密码"} minLength={8} maxLength={128} required /></div></label>
+          {registering ? <label><span>确认密码</span><div><LockKeyhole size={18} /><input name="confirmPassword" type="password" autoComplete="new-password" placeholder="请再次输入密码" minLength={8} maxLength={128} required /></div></label> : null}
+          {registering ? <label className="login-consent"><input name="acceptedTerms" type="checkbox" required /><span>我已阅读并同意 <a href="/terms" target="_blank">用户协议</a> 和 <a href="/privacy" target="_blank">隐私政策</a></span></label> : null}
           {error ? <div className="login-error">{error}</div> : null}
-          <button className="button button-primary full" type="submit" disabled={busy}>{busy ? "正在安全登录…" : "登录平台"}</button>
-          <small>首次登录或忘记密码，请联系邵教练重置。为保护隐私，请勿共享账号。</small>
+          <button className="button button-primary full" type="submit" disabled={busy}>{busy ? (registering ? "正在创建账号…" : "正在安全登录…") : (registering ? "注册并进入平台" : "登录平台")}</button>
+          <button className="login-mode-link" type="button" onClick={() => switchMode(registering ? "login" : "register")}>{registering ? "已有账号？返回登录" : "还没有账号？立即注册"}</button>
+          <small>{registering ? "仅开放会员注册；教练与管理员账号由系统管理员创建。" : "忘记密码请联系邵教练重置。为保护隐私，请勿共享账号。"}</small>
         </form>
         <footer>© 2026 邵教练专属会员平台 · 武汉</footer>
       </section>

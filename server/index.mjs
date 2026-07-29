@@ -73,6 +73,7 @@ const server = createServer(async (request, response) => {
       },
     });
     if (url.pathname === "/api/auth/login" && request.method === "POST") return login(request, response);
+    if (url.pathname === "/api/auth/register" && request.method === "POST") return register(request, response);
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
       response.setHeader("set-cookie", `shao_session=; Path=/; HttpOnly; ${cookieSecure ? "Secure; " : ""}SameSite=Strict; Max-Age=0`);
       return json(response, 200, { ok: true });
@@ -159,10 +160,90 @@ async function login(request, response) {
     await new Promise((resolve) => setTimeout(resolve, 350));
     return json(response, 401, { error: "手机号或密码错误" });
   }
+  return issueSession(response, user);
+}
+
+async function register(request, response) {
+  if (!sameOrigin(request)) return json(response, 403, { error: "请求来源无效" });
+  const body = await readJson(request);
+  const name = String(body.name || "").trim();
+  const phone = String(body.phone || "").replace(/\s/g, "");
+  const password = String(body.password || "");
+  const confirmPassword = String(body.confirmPassword || "");
+  const acceptedTerms = body.acceptedTerms === true;
+
+  if (name.length < 2 || name.length > 30) return json(response, 400, { error: "姓名需为 2–30 个字符" });
+  if (!/^1[3-9]\d{9}$/.test(phone)) return json(response, 400, { error: "请输入正确的中国内地手机号" });
+  if (password.length < 8 || password.length > 128 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+    return json(response, 400, { error: "密码需为 8–128 位，并同时包含字母和数字" });
+  }
+  if (password !== confirmPassword) return json(response, 400, { error: "两次输入的密码不一致" });
+  if (!acceptedTerms) return json(response, 400, { error: "请先阅读并同意用户协议与隐私政策" });
+
+  const id = `member-${randomUUID()}`;
+  const passwordHash = await bcrypt.hash(password, 12);
+  const memberState = createMemberState({ id, name, phone });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "INSERT INTO users (id,phone,name,role,password_hash,status) VALUES ($1,$2,$3,'member',$4,'active')",
+      [id, phone, name, passwordHash],
+    );
+    await client.query("INSERT INTO portal_state (user_id,state_json) VALUES ($1,$2)", [id, memberState]);
+    await client.query(
+      "INSERT INTO audit_log (id,actor_id,action,detail) VALUES ($1,$2,'self_register',$3)",
+      [randomUUID(), id, { channel: "website", role: "member" }],
+    );
+    await client.query("COMMIT");
+    return issueSession(response, { id, name, role: "member" }, 201);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    if (error?.code === "23505") return json(response, 409, { error: "该手机号已注册，请直接登录" });
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function createMemberState({ id, name, phone }) {
+  const state = structuredClone(seedState);
+  state.profile = {
+    id,
+    name,
+    phone: phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2"),
+    plan: "新会员 · 待教练建档",
+    expiresAt: "待开通",
+    coach: "邵教练",
+    level: "会员",
+  };
+  state.bodyMetrics = [];
+  state.meals = state.meals.map((meal) => ({ ...meal, completed: false }));
+  state.waterMl = 0;
+  state.checkinDates = [];
+  state.streak = 0;
+  state.bookings = state.bookings.map((booking) => ({
+    ...booking,
+    status: booking.status === "可预约" ? "可预约" : "待确认",
+  }));
+  state.suggestions = [{
+    id: `onboarding-${randomUUID()}`,
+    member: name,
+    avatar: name.slice(0, 1),
+    title: "完成首次会员建档",
+    category: "训练调整",
+    content: "欢迎加入邵教练专属会员平台。请先记录身体数据、训练目标与可训练时间，邵教练确认后会为你制定个性化计划。",
+    status: "待确认",
+    priority: "普通",
+  }];
+  return state;
+}
+
+async function issueSession(response, user, status = 200) {
   const token = await new SignJWT({ role: user.role, name: user.name })
     .setProtectedHeader({ alg: "HS256" }).setSubject(user.id).setIssuedAt().setExpirationTime("12h").sign(sessionSecret);
   response.setHeader("set-cookie", `shao_session=${token}; Path=/; HttpOnly; ${cookieSecure ? "Secure; " : ""}SameSite=Strict; Max-Age=43200`);
-  return json(response, 200, { user: { id: user.id, name: user.name, role: user.role } });
+  return json(response, status, { user: { id: user.id, name: user.name, role: user.role } });
 }
 
 async function readSession(request) {
@@ -215,8 +296,7 @@ async function createUser(request, response, session) {
       [id, phone, name, role, passwordHash],
     );
     if (role === "member") {
-      const memberState = structuredClone(seedState);
-      memberState.profile = { ...memberState.profile, id, name, phone: phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2") };
+      const memberState = createMemberState({ id, name, phone });
       await pool.query("INSERT INTO portal_state (user_id,state_json) VALUES ($1,$2)", [id, memberState]);
     }
     await audit(session.id, "user_create", { id, role });

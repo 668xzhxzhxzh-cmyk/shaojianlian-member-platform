@@ -36,7 +36,7 @@ const weeklyDays = ["一", "二", "三", "四", "五", "六", "日"];
 
 export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
   const { state, checkIn } = usePortal();
-  const latest = state.bodyMetrics.at(-1)!;
+  const latest = state.bodyMetrics.at(-1);
   const mealCalories = state.meals
     .filter((meal) => meal.completed)
     .reduce((sum, meal) => sum + meal.calories, 0);
@@ -144,10 +144,10 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
         <Card>
           <SectionTitle title="当前身体状态" />
           <div className="metric-rows">
-            <MetricRow label="体重" value={`${latest.weight} kg`} delta="↓ 2.9 kg" />
-            <MetricRow label="体脂率" value={`${latest.bodyFat}%`} delta="↓ 1.9%" />
-            <MetricRow label="肌肉量" value={`${latest.muscle} kg`} delta="↑ 1.6 kg" />
-            <MetricRow label="恢复评分" value="82 分" delta="良好" />
+            <MetricRow label="体重" value={latest ? `${latest.weight} kg` : "待记录"} delta={latest ? "查看趋势" : "完成首次建档"} />
+            <MetricRow label="体脂率" value={latest ? `${latest.bodyFat}%` : "待记录"} delta={latest ? "查看趋势" : "完成首次建档"} />
+            <MetricRow label="肌肉量" value={latest ? `${latest.muscle} kg` : "待记录"} delta={latest ? "查看趋势" : "完成首次建档"} />
+            <MetricRow label="恢复评分" value={latest ? "82 分" : "待评估"} delta={latest ? "良好" : "等待教练评估"} />
           </div>
         </Card>
       </div>
@@ -376,8 +376,8 @@ export function BodyView() {
   const { state, saveBodyMetric } = usePortal();
   const [open, setOpen] = useState(false);
   const [metric, setMetric] = useState<"weight" | "bodyFat" | "muscle">("weight");
-  const latest = state.bodyMetrics.at(-1)!;
-  const previous = state.bodyMetrics.at(-2)!;
+  const latest = state.bodyMetrics.at(-1);
+  const previous = state.bodyMetrics.at(-2);
   const metricLabels = { weight: "体重", bodyFat: "体脂率", muscle: "肌肉量" };
   const metricSuffix = { weight: " kg", bodyFat: "%", muscle: " kg" };
 
@@ -400,10 +400,10 @@ export function BodyView() {
         <button className="button button-primary" onClick={() => setOpen(true)}><Plus size={18} /> 记录身体数据</button>
       </div>
       <div className="stats-grid four">
-        <StatCard icon={Scale} label="当前体重" value={latest.weight} suffix="kg" note={`较上次 ${(latest.weight - previous.weight).toFixed(1)} kg`} />
-        <StatCard icon={Target} label="体脂率" value={latest.bodyFat} suffix="%" note="目标 13.5%" accent="amber" />
-        <StatCard icon={Dumbbell} label="肌肉量" value={latest.muscle} suffix="kg" note="近三周 +1.6 kg" />
-        <StatCard icon={Footprints} label="腰围" value={latest.waist} suffix="cm" note="近三周 -3.1 cm" accent="slate" />
+        <StatCard icon={Scale} label="当前体重" value={latest?.weight ?? "—"} suffix={latest ? "kg" : ""} note={latest && previous ? `较上次 ${(latest.weight - previous.weight).toFixed(1)} kg` : "等待首次记录"} />
+        <StatCard icon={Target} label="体脂率" value={latest?.bodyFat ?? "—"} suffix={latest ? "%" : ""} note={latest ? "持续记录更准确" : "等待首次记录"} accent="amber" />
+        <StatCard icon={Dumbbell} label="肌肉量" value={latest?.muscle ?? "—"} suffix={latest ? "kg" : ""} note={latest ? "持续记录更准确" : "等待首次记录"} />
+        <StatCard icon={Footprints} label="腰围" value={latest?.waist ?? "—"} suffix={latest ? "cm" : ""} note={latest ? "持续记录更准确" : "等待首次记录"} accent="slate" />
       </div>
       <Card>
         <SectionTitle title={`近 30 天${metricLabels[metric]}趋势`} action={<div className="segmented"><button className={metric === "weight" ? "active" : ""} onClick={() => setMetric("weight")}>体重</button><button className={metric === "bodyFat" ? "active" : ""} onClick={() => setMetric("bodyFat")}>体脂率</button><button className={metric === "muscle" ? "active" : ""} onClick={() => setMetric("muscle")}>肌肉量</button></div>} />
@@ -422,10 +422,10 @@ export function BodyView() {
             <button type="button" className="icon-button modal-close" onClick={() => setOpen(false)} aria-label="关闭"><X size={20} /></button>
             <span className="eyebrow">数据记录</span><h2>记录今天的身体状态</h2><p>保留一位小数，测量单位已固定。</p>
             <div className="form-grid">
-              <label>体重（kg）<input name="weight" type="number" step="0.1" defaultValue={latest.weight} required /></label>
-              <label>体脂率（%）<input name="bodyFat" type="number" step="0.1" defaultValue={latest.bodyFat} required /></label>
-              <label>肌肉量（kg）<input name="muscle" type="number" step="0.1" defaultValue={latest.muscle} required /></label>
-              <label>腰围（cm）<input name="waist" type="number" step="0.1" defaultValue={latest.waist} required /></label>
+              <label>体重（kg）<input name="weight" type="number" step="0.1" min="20" max="350" defaultValue={latest?.weight} required /></label>
+              <label>体脂率（%）<input name="bodyFat" type="number" step="0.1" min="1" max="70" defaultValue={latest?.bodyFat} required /></label>
+              <label>肌肉量（kg）<input name="muscle" type="number" step="0.1" min="5" max="150" defaultValue={latest?.muscle} required /></label>
+              <label>腰围（cm）<input name="waist" type="number" step="0.1" min="30" max="250" defaultValue={latest?.waist} required /></label>
             </div>
             <button className="button button-primary full" type="submit">保存记录</button>
           </form>

@@ -541,10 +541,19 @@ button.table-row:hover { background: #faf9f4; }
 .login-form { width: min(430px,100%); display: grid; gap: 18px; padding: clamp(26px,4vw,48px); border: 1px solid var(--line); border-radius: 20px; background: var(--card); box-shadow: var(--shadow); }
 .login-form h2 { font-family: "Songti SC",serif; font-size: 32px; }
 .login-form > p { color: var(--muted); margin-top: -12px; }
+.login-mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 10px; background: var(--paper); }
+.login-mode-switch button { min-height: 38px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-weight: 700; cursor: pointer; }
+.login-mode-switch button.active { background: var(--card); color: var(--green); box-shadow: 0 1px 6px rgba(43,54,36,.1); }
 .login-form > label { display: grid; gap: 7px; font-weight: 700; }
 .login-form > label > div { min-height: 47px; display: flex; align-items: center; gap: 9px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; background: white; color: var(--muted); }
 .login-form input { flex: 1; min-width: 0; border: 0; outline: 0; box-shadow: none; background: transparent; }
+.login-form > label > div:focus-within { border-color: var(--green); box-shadow: 0 0 0 3px rgba(67,84,56,.1); }
+.login-consent { display: flex !important; grid-template-columns: none; align-items: flex-start; gap: 9px !important; color: var(--muted); font-size: 12px; line-height: 1.7; font-weight: 400 !important; cursor: pointer; }
+.login-consent input { flex: 0 0 auto; width: 16px; height: 16px; margin-top: 2px; accent-color: var(--green); }
+.login-consent a { color: var(--green); font-weight: 700; }
 .login-form .button { margin-top: 3px; }
+.login-mode-link { border: 0; background: transparent; color: var(--green); font-weight: 700; cursor: pointer; }
+.login-mode-link:hover { text-decoration: underline; }
 .login-form > small { text-align: center; }
 .login-error { padding: 9px 11px; border-radius: 8px; background: var(--red-soft); color: var(--red); font-size: 12px; }
 .login-form-panel > footer { margin-top: 20px; color: var(--muted); font-size: 10px; }
