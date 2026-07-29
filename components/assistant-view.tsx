@@ -1,0 +1,226 @@
+"use client";
+
+import { FormEvent, useMemo, useRef, useState } from "react";
+import {
+  Activity,
+  ArrowUp,
+  Bot,
+  Check,
+  ChevronDown,
+  ClipboardCheck,
+  Dumbbell,
+  Edit3,
+  FileText,
+  History,
+  MessageCircleMore,
+  MoonStar,
+  RefreshCcw,
+  Send,
+  ShieldAlert,
+  Sparkles,
+  Utensils,
+} from "lucide-react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { usePortal } from "./portal-context";
+import { Avatar, Card, SectionTitle } from "./ui";
+
+type ChatMessage = { role: "coach" | "assistant"; content: string; time: string };
+
+const quickPrompts = [
+  "分析最近训练表现",
+  "评估身体恢复变化",
+  "给出饮食优化建议",
+  "生成本周训练目标",
+  "检查高风险会员",
+  "安排睡眠恢复提醒",
+];
+
+export function AssistantView() {
+  const { state, notify, updateSuggestion } = usePortal();
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { role: "coach", content: "帮我分析一下李明最近的训练和恢复情况，他上周感觉肩部有些酸痛。", time: "10:32" },
+    { role: "assistant", content: "我已汇总近 7 天训练、恢复、睡眠与身体数据。李明的下肢训练保持稳定，但上肢推举负荷偏高；平均睡眠 6.2 小时，恢复评分下降到 68。建议降低上肢推举强度并安排肩部放松评估。", time: "10:33" },
+  ]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const suggestion = state.suggestions[0];
+
+  const chartData = useMemo(
+    () => state.bodyMetrics.slice(-7).map((item, index) => ({ ...item, load: [1820, 1940, 1600, 2250, 1760, 2140, 1680][index] })),
+    [state.bodyMetrics],
+  );
+
+  async function askHermes(event?: FormEvent) {
+    event?.preventDefault();
+    const message = input.trim();
+    if (!message || busy) return;
+    const nextMessages = [...messages, { role: "coach" as const, content: message, time: now() }];
+    setMessages(nextMessages);
+    setInput("");
+    setBusy(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setMessages((items) => [...items, { role: "assistant", content: "", time: now() }]);
+    try {
+      const response = await fetch("/api/agent/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          member: state.profile,
+          bodyMetrics: state.bodyMetrics.slice(-7),
+          meals: state.meals,
+          messages: nextMessages.map((item) => ({
+            role: item.role === "coach" ? "user" : "assistant",
+            content: item.content,
+          })),
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(await response.text());
+      if (!response.body) throw new Error("Hermes 暂时没有返回内容");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+        setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: text } : item));
+      }
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") {
+        setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: "Hermes 当前处于演示模式。请在部署环境配置 DEEPSEEK_API_KEY 后即可获得实时个性化回答；其他业务功能不受影响。" } : item));
+        notify("未检测到 DeepSeek 密钥，已切换演示回复", "warning");
+      }
+    } finally {
+      setBusy(false);
+      abortRef.current = null;
+    }
+  }
+
+  function usePrompt(prompt: string) {
+    setInput(prompt);
+    window.setTimeout(() => document.getElementById("hermes-input")?.focus(), 20);
+  }
+
+  async function confirmAndSend() {
+    updateSuggestion(suggestion.id, "已发送");
+    try {
+      const response = await fetch("/api/notifications/wecom", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ member: suggestion.member, title: suggestion.title, content: suggestion.content }),
+      });
+      const result = await response.json() as { sent?: boolean };
+      if (result.sent) notify("Hermes 已通过企业微信机器人发送");
+      else notify("建议已确认；配置企业微信 Webhook 后将自动推送", "info");
+    } catch {
+      notify("建议已确认并进入待推送队列", "info");
+    }
+  }
+
+  return (
+    <div className="assistant-page">
+      <section className="page-intro assistant-intro">
+        <span className="eyebrow">Hermes Agent · DeepSeek</span>
+        <h1>智能助理工作台</h1>
+        <p>让 Hermes 整理数据、生成建议，最终由教练确认后触达会员。</p>
+      </section>
+      <div className="assistant-flow" aria-label="建议工作流">
+        <span className="done"><Check size={16} /> 沟通分析<small>明确目标</small></span>
+        <i />
+        <span className="done"><Check size={16} /> 生成建议<small>结合会员数据</small></span>
+        <i />
+        <span className="active">3 教练确认并发送<small>微信机器人触达</small></span>
+      </div>
+
+      <div className="assistant-grid">
+        <Card className="chat-panel">
+          <div className="chat-heading"><div><MessageCircleMore size={20} /><b>与 Hermes 对话</b></div><button className="icon-button" aria-label="历史记录"><History size={18} /></button></div>
+          <div className="chat-messages">
+            {messages.map((message, index) => (
+              <div className={`chat-message ${message.role}`} key={`${message.time}-${index}`}>
+                <Avatar name={message.role === "coach" ? "邵教练" : "H"} size="sm" />
+                <div><span>{message.role === "coach" ? "邵教练" : "Hermes"} <time>{message.time}</time></span><p>{message.content || <i className="typing">正在分析会员数据</i>}</p></div>
+              </div>
+            ))}
+          </div>
+          <div className="quick-prompts">
+            <span>快捷指令</span>
+            <div>{quickPrompts.map((prompt) => <button key={prompt} onClick={() => usePrompt(prompt)}>{prompt}</button>)}</div>
+          </div>
+          <form className="chat-input" onSubmit={askHermes}>
+            <textarea id="hermes-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入你希望 Hermes 分析的问题或任务…" rows={3} />
+            <button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="发送给 Hermes">{busy ? <RefreshCcw className="spin" size={18} /> : <ArrowUp size={18} />}</button>
+          </form>
+          <small className="ai-disclaimer">AI 建议仅供教练决策参考，不能替代医疗诊断。</small>
+        </Card>
+
+        <div className="suggestion-column">
+          <Card className="member-selector">
+            <SectionTitle title="选择会员" />
+            <button><Avatar name="李明" /><span><b>李明 <em>VIP</em></b><small>28 岁 · 178cm / 72kg</small></span><ChevronDown size={18} /></button>
+            <div><span>本周训练<b>4 / 5 次</b></span><span>恢复评分<b>68 分</b></span><span>最近训练<b>7 月 28 日</b></span></div>
+          </Card>
+          <Card>
+            <div className="suggestion-heading">
+              <div><span className="eyebrow">AI 草稿 · 待邵教练确认</span><h2>为李明生成的个性化建议</h2></div>
+              <div><button className="button button-secondary button-small"><RefreshCcw size={15} /> 重新生成</button><button className="button button-secondary button-small"><FileText size={15} /> 保存草稿</button></div>
+            </div>
+            <div className="recommendation-list">
+              <Recommendation icon={Dumbbell} title="训练调整" text="近 7 天肩部疲劳度偏高，建议下调上肢推举动作强度 10–15%，重点进行肩袖稳定与灵活性训练。" source="训练记录 · 身体数据" />
+              <Recommendation icon={Utensils} title="饮食建议" text="优质蛋白日摄入建议维持 1.6–1.8 g/kg，增加深色蔬菜与抗炎食物，减少高糖高油饮品。" source="饮食记录 · 身体数据" />
+              <Recommendation icon={MoonStar} title="恢复提醒" text="最近睡眠 6.2 小时，建议保证 7–8 小时睡眠；睡前进行 10 分钟呼吸与肩部放松。" source="身体数据 · 打卡记录" />
+              <Recommendation icon={ShieldAlert} title="风险提示" text="肩部酸痛持续较多，若出现夜间痛或活动受限，应暂停相关负荷并及时咨询专业医务人员。" source="沟通记录 · 风险规则" />
+              <Recommendation icon={ClipboardCheck} title="跟进任务" text="安排一次肩部放松与动作评估；下周训练前复测恢复评分，并根据结果调整计划。" source="沟通记录" />
+            </div>
+            <div className="suggestion-actions"><button className="button button-secondary"><Edit3 size={17} /> 修改建议</button><button className="button button-primary" onClick={confirmAndSend}><Send size={17} /> 确认并交给 Hermes 推送</button></div>
+          </Card>
+        </div>
+
+        <div className="evidence-column">
+          <Card>
+            <SectionTitle title="会员证据概览" action={<button className="text-button">查看全部</button>} />
+            <div className="evidence-list"><Evidence icon={Dumbbell} label="训练记录" value="本周 4 / 5 次 · 负荷 1,820 kcal" /><Evidence icon={Activity} label="身体数据" value="体重 67.9 kg · 体脂 14.2%" /><Evidence icon={MoonStar} label="打卡记录" value="睡眠 6.2h · 恢复评分 68" /><Evidence icon={MessageCircleMore} label="沟通记录" value="肩部酸痛（训练中出现）" /></div>
+          </Card>
+          <Card>
+            <SectionTitle title="趋势图表（近 7 天）" />
+            <MiniTrend title="训练负荷（kcal）" data={chartData} dataKey="load" />
+            <MiniTrend title="体重（kg）" data={chartData} dataKey="weight" />
+            <MiniTrend title="体脂率（%）" data={chartData} dataKey="bodyFat" />
+          </Card>
+          <Card className="agent-status">
+            <Bot size={24} /><div><b>Hermes 服务正常</b><span>DeepSeek 模型 · 武汉时区</span></div><i />
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Recommendation({ icon: Icon, title, text, source }: { icon: typeof Dumbbell; title: string; text: string; source: string }) {
+  return <article><span><Icon size={22} /></span><div><h3>{title}<em>可编辑</em></h3><p>{text}</p></div><small>数据来源：{source}</small><button className="text-button"><Edit3 size={14} /> 编辑建议</button></article>;
+}
+
+function Evidence({ icon: Icon, label, value }: { icon: typeof Dumbbell; label: string; value: string }) {
+  return <div><Icon size={19} /><span><b>{label}</b><small>{value}</small></span></div>;
+}
+
+function MiniTrend({ title, data, dataKey }: { title: string; data: Record<string, unknown>[]; dataKey: string }) {
+  return (
+    <div className="mini-trend"><div className="row-between"><b>{title}</b><small>平均趋势</small></div><ResponsiveContainer width="100%" height={88}><LineChart data={data} margin={{ top: 6, right: 4, left: 4, bottom: 0 }}><CartesianGrid vertical={false} stroke="#ece9df" /><XAxis dataKey="date" hide /><YAxis hide domain={["dataMin - 1", "dataMax + 1"]} /><Tooltip /><Line type="monotone" dataKey={dataKey} stroke="#3f4d31" strokeWidth={2} dot={{ r: 2.5 }} /></LineChart></ResponsiveContainer></div>
+  );
+}
+
+function now() {
+  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" }).format(new Date());
+}

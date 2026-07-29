@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+.next
+.vinext
+.wrangler
+dist
+node_modules
+backups
+*.log
