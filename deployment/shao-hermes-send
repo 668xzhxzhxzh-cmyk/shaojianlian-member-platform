@@ -1,0 +1,46 @@
+#!/usr/bin/env node
+
+import { spawn } from "node:child_process";
+
+const hermesBinary = "/var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes";
+const target = String(process.argv[2] || "");
+
+if (!/^[A-Za-z0-9_.@:+-]{1,256}$/.test(target)) {
+  process.stderr.write("微信目标 ID 格式无效\n");
+  process.exit(64);
+}
+
+const chunks = [];
+let size = 0;
+for await (const chunk of process.stdin) {
+  size += chunk.length;
+  if (size > 6000) {
+    process.stderr.write("消息超过 6000 字节限制\n");
+    process.exit(65);
+  }
+  chunks.push(chunk);
+}
+
+const message = Buffer.concat(chunks).toString("utf8").trim();
+if (!message) {
+  process.stderr.write("消息不能为空\n");
+  process.exit(66);
+}
+
+const child = spawn(hermesBinary, ["send", "--to", `weixin:${target}`, "--file", "-", "--json"], {
+  env: {
+    ...process.env,
+    HOME: "/var/lib/hermes",
+    HERMES_HOME: "/var/lib/hermes/.hermes",
+  },
+  stdio: ["pipe", "inherit", "inherit"],
+});
+
+child.on("error", (error) => {
+  process.stderr.write(`${error.message}\n`);
+  process.exit(70);
+});
+child.on("close", (code, signal) => {
+  process.exit(signal ? 71 : (code ?? 70));
+});
+child.stdin.end(message, "utf8");

@@ -15,7 +15,7 @@ test("builds the member portal without starter artifacts", async () => {
   assert.doesNotMatch(`${page}${portal}${packageJson}`, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
-test("includes coach approval, DeepSeek and official WeChat routes", async () => {
+test("includes coach approval, native Hermes and WeChat routes", async () => {
   const [coach, assistant, deepseek, weixin] = await Promise.all([
     readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/assistant-view.tsx", import.meta.url), "utf8"),
@@ -25,7 +25,7 @@ test("includes coach approval, DeepSeek and official WeChat routes", async () =>
   assert.match(coach, /教练工作台/);
   assert.match(assistant, /Hermes Agent/);
   assert.match(deepseek, /deepseek-v4-flash/);
-  assert.match(weixin, /openclaw-weixin/);
+  assert.match(weixin, /hermes-weixin/);
   assert.match(assistant, /notifications\/weixin/);
 });
 
@@ -36,7 +36,8 @@ test("keeps mainland deployment and secret configuration documented", async () =
     readFile(new URL("../README.md", import.meta.url), "utf8"),
   ]);
   assert.match(envExample, /DEEPSEEK_API_KEY/);
-  assert.match(envExample, /OPENCLAW_GATEWAY_TOKEN/);
+  assert.match(envExample, /HERMES_API_KEY/);
+  assert.doesNotMatch(`${envExample}${readme}`, /OPENCLAW_GATEWAY_TOKEN|openclaw-weixin/i);
   assert.match(compose, /Asia\/Shanghai/);
   assert.match(readme, /ICP\s*备案/);
 });

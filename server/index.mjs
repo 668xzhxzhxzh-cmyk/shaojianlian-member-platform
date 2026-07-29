@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import pg from "pg";
@@ -66,8 +67,9 @@ const server = createServer(async (request, response) => {
       region: "wuhan",
       time: new Date().toISOString(),
       integrations: {
-        deepseek: Boolean(process.env.DEEPSEEK_API_KEY),
-        weixin: Boolean(process.env.OPENCLAW_GATEWAY_URL && process.env.OPENCLAW_GATEWAY_TOKEN),
+        deepseek: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
+        hermes: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
+        weixin: Boolean(process.env.WEIXIN_TARGET_ID),
       },
     });
     if (url.pathname === "/api/auth/login" && request.method === "POST") return login(request, response);
@@ -261,17 +263,37 @@ async function handleHermes(request, response, session) {
   const body = await readJson(request);
   const messages = Array.isArray(body.messages) ? body.messages.slice(-20).filter((item) => ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.length <= 4000) : [];
   if (!messages.length) return json(response, 400, { error: "请输入问题" });
-  if (!process.env.DEEPSEEK_API_KEY) return json(response, 503, { error: "DEEPSEEK_API_KEY 尚未配置" });
-  const upstream = await fetch(`${(process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "")}/chat/completions`, {
+  if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) return json(response, 503, { error: "原生 Hermes API 尚未配置" });
+
+  let hermesApi;
+  try {
+    hermesApi = new URL(process.env.HERMES_API_URL);
+  } catch {
+    return json(response, 500, { error: "Hermes API 地址无效" });
+  }
+  const allowedHosts = new Set(["127.0.0.1", "localhost", "host.docker.internal"]);
+  if (!["http:", "https:"].includes(hermesApi.protocol) || !allowedHosts.has(hermesApi.hostname)) {
+    return json(response, 500, { error: "Hermes API 必须使用服务器私有回环地址" });
+  }
+
+  const upstream = await fetch(new URL("/v1/chat/completions", hermesApi), {
     method: "POST",
-    headers: { authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`, "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${process.env.HERMES_API_KEY}`,
+      "content-type": "application/json",
+      "x-hermes-session-key": `shao-platform:${session.id}`,
+    },
     body: JSON.stringify({
-      model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash", stream: true, stream_options: { include_usage: true },
-      thinking: { type: "disabled" }, max_tokens: 1600,
+      model: "hermes-agent",
+      stream: true,
       messages: [{ role: "system", content: hermesPrompt }, { role: "system", content: `以下是只读会员数据：${JSON.stringify({ member: body.member, bodyMetrics: body.bodyMetrics, meals: body.meals }).slice(0, 12000)}` }, ...messages],
     }),
+    signal: AbortSignal.timeout(120000),
   });
-  if (!upstream.ok || !upstream.body) return json(response, 502, { error: "DeepSeek 服务暂时不可用" });
+  if (!upstream.ok || !upstream.body) {
+    console.error(JSON.stringify({ level: "error", integration: "hermes", status: upstream.status }));
+    return json(response, 502, { error: "Hermes 智能体暂时不可用" });
+  }
   response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store, no-transform", "x-accel-buffering": "no" });
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
@@ -325,68 +347,59 @@ async function handleWeixin(request, response, session) {
   if (!member || !title || !content) return json(response, 400, { error: "消息内容不完整" });
 
   const id = randomUUID();
-  const gatewayValue = process.env.OPENCLAW_GATEWAY_URL;
-  const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
   const target = process.env.WEIXIN_TARGET_ID;
-  if (!gatewayValue || !gatewayToken || !target) {
+  if (!target) {
     await pool.query(
-      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'openclaw-weixin',$4,$5,'queued',$6)",
-      [id, session.id, member, title, content, !gatewayValue || !gatewayToken ? "微信通道尚未启动" : "等待会员建立微信会话"],
+      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'hermes-weixin',$4,$5,'queued',$6)",
+      [id, session.id, member, title, content, "等待会员向原生 Hermes 微信机器人发送首条消息"],
     );
-    return json(response, 202, { sent: false, configured: Boolean(gatewayValue && gatewayToken), queued: true, channel: "openclaw-weixin" });
-  }
-
-  let gateway;
-  try {
-    gateway = new URL(gatewayValue);
-  } catch {
-    return json(response, 500, { error: "微信网关地址无效" });
-  }
-  const allowedHosts = new Set(["127.0.0.1", "localhost", "host.docker.internal"]);
-  if (!["http:", "https:"].includes(gateway.protocol) || !allowedHosts.has(gateway.hostname)) {
-    return json(response, 500, { error: "微信网关必须使用服务器私有回环地址" });
+    return json(response, 202, { sent: false, configured: false, queued: true, channel: "hermes-weixin" });
   }
 
   const message = `【${title}】\n会员：${member}\n${content}\n\n— Hermes 整理，邵教练确认`;
   try {
-    const upstream = await fetch(new URL("/tools/invoke", gateway), {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${gatewayToken}`,
-        "content-type": "application/json",
-        "x-openclaw-message-channel": "openclaw-weixin",
-        "x-openclaw-message-to": target,
-        ...(process.env.WEIXIN_ACCOUNT_ID ? { "x-openclaw-account-id": process.env.WEIXIN_ACCOUNT_ID } : {}),
-      },
-      body: JSON.stringify({
-        tool: "message",
-        action: "send",
-        args: {
-          channel: "openclaw-weixin",
-          target,
-          message,
-          ...(process.env.WEIXIN_ACCOUNT_ID ? { account: process.env.WEIXIN_ACCOUNT_ID } : {}),
-        },
-        idempotencyKey: id,
-      }),
-    });
-    const result = await upstream.json().catch(() => ({}));
-    const sent = upstream.ok && result.ok !== false;
+    const result = await sendNativeHermesWeixin(target, message);
+    const sent = result.ok;
     await pool.query(
-      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'openclaw-weixin',$4,$5,$6,$7)",
-      [id, session.id, member, title, content, sent ? "sent" : "failed", sent ? "腾讯微信通道已接收" : String(result.error?.message || "微信发送失败").slice(0, 300)],
+      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'hermes-weixin',$4,$5,$6,$7)",
+      [id, session.id, member, title, content, sent ? "sent" : "failed", sent ? "原生 Hermes 微信通道已接收" : result.message],
     );
     await audit(session.id, "weixin_send", { member, title, sent });
     return sent
-      ? json(response, 200, { sent: true, channel: "openclaw-weixin" })
-      : json(response, 502, { sent: false, error: result.error?.message || "微信发送失败" });
+      ? json(response, 200, { sent: true, channel: "hermes-weixin" })
+      : json(response, 502, { sent: false, error: result.message || "微信发送失败" });
   } catch (error) {
     await pool.query(
-      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'openclaw-weixin',$4,$5,'failed',$6)",
-      [id, session.id, member, title, content, error instanceof Error ? error.message.slice(0, 300) : "微信网关不可用"],
+      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'hermes-weixin',$4,$5,'failed',$6)",
+      [id, session.id, member, title, content, error instanceof Error ? error.message.slice(0, 300) : "Hermes 微信通道不可用"],
     );
-    return json(response, 502, { sent: false, error: "微信网关暂时不可用" });
+    return json(response, 502, { sent: false, error: "Hermes 微信通道暂时不可用" });
   }
+}
+
+function sendNativeHermesWeixin(target, message) {
+  const wrapper = process.env.HERMES_SEND_WRAPPER || "/usr/local/bin/shao-hermes-send";
+  return new Promise((resolve) => {
+    const child = spawn("/usr/bin/sudo", ["-n", "-H", "-u", "hermes", wrapper, target], {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => child.kill("SIGTERM"), 30000);
+    child.stdout.on("data", (chunk) => { stdout = (stdout + chunk.toString("utf8")).slice(-4000); });
+    child.stderr.on("data", (chunk) => { stderr = (stderr + chunk.toString("utf8")).slice(-4000); });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      resolve({ ok: false, message: error.message.slice(0, 300) });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      const detail = (stderr || stdout || `Hermes 发送进程退出码 ${code}`).trim().slice(0, 300);
+      resolve({ ok: code === 0, message: detail });
+    });
+    child.stdin.end(message, "utf8");
+  });
 }
 
 async function audit(actorId, action, detail) {

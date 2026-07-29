@@ -22,6 +22,6 @@ export async function POST(request: Request) {
     sent: false,
     configured: false,
     queued: true,
-    channel: "openclaw-weixin",
+    channel: "hermes-weixin",
   }, { status: 202 });
 }

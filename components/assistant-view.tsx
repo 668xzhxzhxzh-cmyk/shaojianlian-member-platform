@@ -92,8 +92,8 @@ export function AssistantView() {
       }
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
-        setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: "Hermes 当前处于演示模式。请在部署环境配置 DEEPSEEK_API_KEY 后即可获得实时个性化回答；其他业务功能不受影响。" } : item));
-        notify("未检测到 DeepSeek 密钥，已切换演示回复", "warning");
+        setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: "Hermes 当前处于演示模式。请在生产服务器启动原生 Hermes API 后即可获得实时个性化回答；其他业务功能不受影响。" } : item));
+        notify("原生 Hermes 暂未连接，已切换演示回复", "warning");
       }
     } finally {
       setBusy(false);

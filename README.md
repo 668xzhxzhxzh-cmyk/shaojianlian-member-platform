@@ -1,14 +1,14 @@
 # 邵教练专属会员平台
 
-面向武汉私教业务的完整会员服务平台，包含会员端、教练端、管理端、Hermes 智能助理、DeepSeek API、腾讯官方微信通道、持久化数据、账号保护与阿里云容器部署。
+面向武汉私教业务的完整会员服务平台，包含会员端、教练端、管理端、原生 Hermes 智能体、DeepSeek API、Hermes 原生微信通道、持久化数据、账号保护与阿里云部署。
 
 ## 已实现功能
 
 - 会员端：训练计划、训练计时、饮食与饮水记录、连续打卡、身体指标与趋势、课程预约、会员权益。
 - 教练端：会员健康概览、预约日程、恢复与风险提示、AI 建议确认、发送队列。
 - 管理端：运营指标、用户角色、服务状态、集成状态、安全与备案提示。
-- Hermes Agent：使用 DeepSeek OpenAI 兼容接口流式回答；注入会员近期数据；隐藏推理过程；内置运动风险与医疗边界提示。
-- 消息推送：只有教练确认后才能调用腾讯官方 `openclaw-weixin` 通道；Gateway 仅在服务器回环网络可用；未扫码或未建立会员会话时进入待推送队列。
+- Hermes Agent：网站通过原生 Hermes API 流式对话，Hermes 使用 `deepseek-v4-flash`；注入会员近期数据；内置运动风险与医疗边界提示。
+- 消息推送：只有教练或管理员确认后才能调用 Hermes 原生 Weixin 通道；API 与 Gateway 仅监听服务器回环网络；未扫码或未建立会员会话时进入待推送队列。
 - 数据与安全：PostgreSQL、中国标准手机号登录、bcrypt 密码哈希、HttpOnly/SameSite 会话、角色校验、来源校验、审计日志、备份脚本。
 - 响应式体验：桌面、平板、手机完整可用；手机底部导航、抽屉导航、触控友好表单；支持添加到主屏幕。
 
@@ -21,15 +21,16 @@ npm install
 npm run dev
 ```
 
-未配置 DeepSeek 或微信通道时，界面与业务功能仍可演示；Hermes 会明确提示缺少密钥，不会伪造真实发送结果。
+未配置原生 Hermes 或微信通道时，界面与其他业务功能仍可运行；系统会明确提示集成未配置，不会伪造真实发送结果。
 
 ## 环境配置
 
 复制 `.env.example` 为 `.env`，至少修改：
 
-- `DEEPSEEK_API_KEY`：DeepSeek 官方 API 密钥。
-- `DEEPSEEK_MODEL`：默认 `deepseek-v4-flash`。
-- `OPENCLAW_GATEWAY_TOKEN`：OpenClaw Gateway 的随机强令牌。
+- `DEEPSEEK_API_KEY`：DeepSeek 官方 API 密钥，只写入 Hermes 的服务器环境。
+- `DEEPSEEK_MODEL`：固定使用 `deepseek-v4-flash`。
+- `HERMES_API_URL`：原生 Hermes API 的回环地址，原生部署默认 `http://127.0.0.1:8642`。
+- `HERMES_API_KEY`：原生 Hermes API 的随机强令牌。
 - `WEIXIN_TARGET_ID`：会员先与机器人建立会话后得到的微信会话目标 ID。
 - `WECOM_WEBHOOK_URL`：可选的企业微信群官方机器人兼容通道。
 - `SESSION_SECRET`：至少 32 字节随机值。
@@ -48,11 +49,11 @@ cp .env.example .env
 sh scripts/deploy-aliyun.sh
 ```
 
-部署由四个容器组成：
+容器部署由四个容器组成，原生 Hermes 独立运行在宿主机：
 
 - Caddy：HTTPS、HTTP/3、压缩、安全响应头与反向代理。
 - Web：响应式会员平台。
-- API：账号、业务、Hermes 与腾讯微信通道推送。
+- API：账号、业务、原生 Hermes API 代理与微信消息推送。
 - PostgreSQL：生产业务数据，不暴露公网。
 
 IP 验收阶段使用 `SITE_ADDRESS=http://公网IP`、`PUBLIC_URL=http://公网IP` 和 `COOKIE_SECURE=false`。域名备案并解析到 ECS 后，把地址改为备案域名、将 `COOKIE_SECURE` 设为 `true` 并重新运行部署脚本，Caddy 会自动申请 HTTPS 证书。
@@ -63,10 +64,12 @@ IP 验收阶段使用 `SITE_ADDRESS=http://公网IP`、`PUBLIC_URL=http://公网
 
 - `deployment/shao-web.service`
 - `deployment/shao-api.service`
-- `deployment/openclaw-hermes.service`
+- `deployment/hermes-gateway.service`
+- `deployment/shao-hermes-send`
+- `deployment/shao-hermes-send.sudoers`
 - `deployment/nginx-ip.conf`
 
-生产目录固定为 `/opt/shao-coach`，`.env` 权限应为 `root:shaoapp 0640`；网站、API 和 OpenClaw Gateway 均只监听 `127.0.0.1`，公网仅由 Nginx 暴露 80/443。Hermes 以独立的 `hermes` 系统用户运行，并通过 systemd 设置内存上限、自动重启与最小文件访问权限。当前 IP 验收完成后，再替换 Nginx 配置中的域名并接入 HTTPS。
+生产目录固定为 `/opt/shao-coach`，`.env` 权限应为 `root:shaoapp 0640`；网站、API 和 Hermes API 均只监听 `127.0.0.1`，公网仅由 Nginx 暴露 80/443。Hermes 以独立的 `hermes` 系统用户运行，并通过 systemd 设置内存上限、自动重启与最小文件访问权限。当前 IP 验收完成后，再替换 Nginx 配置中的域名并接入 HTTPS。
 
 ### 中国内地上线前必须完成
 
@@ -74,19 +77,20 @@ IP 验收阶段使用 `SITE_ADDRESS=http://公网IP`、`PUBLIC_URL=http://公网
 2. 网站开通之日起 30 日内按要求办理公安联网备案。
 3. 在隐私政策和用户协议中补全实际运营主体名称、地址、联系电话、退款规则与个人信息保护负责人。
 4. 真实处理健康与身体数据前，由运营主体完成个人信息处理规则、授权流程、最小必要性和供应商数据条款审查。
-5. 微信通道仅采用腾讯官方 `Tencent/openclaw-weixin` 插件；不要替换成已停止维护、声明不可商用的个人微信逆向框架。
+5. 微信通道使用 Hermes Agent 内置的 Weixin 适配器；不要替换成非官方维护的个人微信逆向框架。
 
 参考：[阿里云 ICP 备案快速入门](https://help.aliyun.com/zh/icp-filing/basic-icp-service/getting-started/quick-start-for-icp-filing-for-personal-websites)、[阿里云 Docker 与 Compose](https://help.aliyun.com/zh/ecs/user-guide/install-and-use-docker)、[DeepSeek 对话补全文档](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)。
 
 ## 微信机器人（腾讯官方通道）
 
-1. 在 ECS 安装 OpenClaw 和官方 DeepSeek provider，默认模型设为 `deepseek/deepseek-v4-flash`。
-2. 安装腾讯官方插件：`npx -y @tencent-weixin/openclaw-weixin-cli install`。
-3. 执行 `openclaw channels login --channel openclaw-weixin`，由运营者扫码授权。
-4. 会员先向机器人发一条消息建立会话，再把目标 ID 写入 `.env` 的 `WEIXIN_TARGET_ID`。
-5. 在管理端测试集成，再由教练确认一条建议。
+1. 在 ECS 为独立的 `hermes` 系统用户安装原生 Hermes Agent。
+2. 在 `/var/lib/hermes/.hermes/.env` 中配置 `DEEPSEEK_API_KEY`、`API_SERVER_KEY`、`API_SERVER_HOST=127.0.0.1`、`API_SERVER_PORT=8642` 和 Weixin 私聊策略。
+3. 将 Hermes 默认 provider 设为 `deepseek`，默认模型设为 `deepseek-v4-flash`。
+4. 以 `hermes` 用户运行 `hermes gateway setup` 并选择 Weixin，由运营者扫码授权；然后启用 `hermes-gateway.service`。
+5. 会员先向机器人发一条消息建立会话，执行 `hermes send --list weixin --json` 获取目标 ID，再写入网站 `.env` 的 `WEIXIN_TARGET_ID`。
+6. 安装 `deployment/shao-hermes-send` 到 `/usr/local/bin/`，安装对应 sudoers 规则，再由教练端发送一条测试消息。
 
-`OPENCLAW_GATEWAY_TOKEN` 是高敏感密钥，只能保存在服务器 `.env` 中。Gateway 必须绑定回环或私有网络，不能直接暴露公网。平台 API 只接受 `127.0.0.1`、`localhost` 或 `host.docker.internal` 作为网关地址。
+`HERMES_API_KEY` 是高敏感密钥，只能保存在服务器环境中。Hermes API 必须绑定 `127.0.0.1`，不能直接暴露公网。平台 API 仅接受 `127.0.0.1`、`localhost` 或 `host.docker.internal` 作为 Hermes API 地址。原生 Weixin 通道以私聊为主，普通微信群消息是否可达取决于微信 iLink Bot 身份能力。
 
 ## 数据备份与恢复
 
