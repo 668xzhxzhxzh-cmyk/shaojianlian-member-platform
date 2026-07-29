@@ -6,6 +6,7 @@ import pg from "pg";
 
 const { Pool } = pg;
 const port = Number(process.env.API_PORT || 8788);
+const host = process.env.API_HOST || "0.0.0.0";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const sessionSecret = new TextEncoder().encode(
   process.env.SESSION_SECRET || "replace-this-before-production",
@@ -102,8 +103,8 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, "0.0.0.0", () => {
-  console.log(JSON.stringify({ level: "info", message: `API listening on ${port}` }));
+server.listen(port, host, () => {
+  console.log(JSON.stringify({ level: "info", message: `API listening on ${host}:${port}` }));
 });
 
 async function initializeDatabase() {

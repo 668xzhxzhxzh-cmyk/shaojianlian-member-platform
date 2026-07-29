@@ -40,6 +40,7 @@ services:
       - .env
     environment:
       TZ: Asia/Shanghai
+      API_HOST: 0.0.0.0
       API_PORT: 8788
       DATABASE_URL: postgresql://${POSTGRES_USER:-shao}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-shao_platform}
       ALLOWED_ORIGIN: ${PUBLIC_URL:-http://localhost}

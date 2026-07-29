@@ -11,6 +11,7 @@ Group=shaoapp
 WorkingDirectory=/opt/shao-coach
 EnvironmentFile=/opt/shao-coach/.env
 Environment=NODE_ENV=production
+Environment=API_HOST=127.0.0.1
 ExecStart=/usr/bin/node /opt/shao-coach/server/index.mjs
 Restart=always
 RestartSec=4

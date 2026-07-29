@@ -1,0 +1,25 @@
+[Unit]
+Description=Hermes OpenClaw Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/var/lib/hermes/.openclaw/workspace
+Environment=HOME=/var/lib/hermes
+EnvironmentFile=/var/lib/hermes/.openclaw/.env
+ExecStart=/usr/bin/openclaw gateway --port 18789
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/hermes
+MemoryMax=650M
+OOMPolicy=continue
+
+[Install]
+WantedBy=multi-user.target

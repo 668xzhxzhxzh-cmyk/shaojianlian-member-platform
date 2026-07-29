@@ -63,9 +63,10 @@ IP 验收阶段使用 `SITE_ADDRESS=http://公网IP`、`PUBLIC_URL=http://公网
 
 - `deployment/shao-web.service`
 - `deployment/shao-api.service`
+- `deployment/openclaw-hermes.service`
 - `deployment/nginx-ip.conf`
 
-生产目录固定为 `/opt/shao-coach`，`.env` 权限应为 `root:shaoapp 0640`；网站和 API 均只监听 `127.0.0.1`，公网仅由 Nginx 暴露 80/443。当前 IP 验收完成后，再替换 Nginx 配置中的域名并接入 HTTPS。
+生产目录固定为 `/opt/shao-coach`，`.env` 权限应为 `root:shaoapp 0640`；网站、API 和 OpenClaw Gateway 均只监听 `127.0.0.1`，公网仅由 Nginx 暴露 80/443。Hermes 以独立的 `hermes` 系统用户运行，并通过 systemd 设置内存上限、自动重启与最小文件访问权限。当前 IP 验收完成后，再替换 Nginx 配置中的域名并接入 HTTPS。
 
 ### 中国内地上线前必须完成
 
