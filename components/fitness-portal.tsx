@@ -82,7 +82,7 @@ export function FitnessPortal({ initialView }: { initialView: PortalView }) {
 }
 
 function PortalShell({ initialView }: { initialView: PortalView }) {
-  const { state, loading, toasts, notify } = usePortal();
+  const { state, loading, toasts, refresh, notify } = usePortal();
   const initialRole: Role = initialView === "admin" ? "admin" : initialView === "coach" ? "coach" : "member";
   const [role, setRole] = useState<Role>(initialRole);
   const [authorizedRole, setAuthorizedRole] = useState<Role | null>(null);
@@ -134,12 +134,13 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
             if (window.location.pathname !== "/admin") window.history.replaceState({}, "", "/admin");
           }
           setAuthStatus("authenticated");
+          void refresh();
         } else {
           setAuthStatus("demo");
         }
       })
       .catch(() => setAuthStatus("demo"));
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     function handlePopState() {
@@ -159,6 +160,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
       setRole(userRole);
       setAuthorizedRole(userRole);
       setAuthStatus("authenticated");
+      void refresh();
       if (userRole === "member") { setView("dashboard"); setActiveNavLabel("首页"); window.history.replaceState({}, "", "/"); }
       if (userRole === "coach") { setView("coach"); setActiveNavLabel("工作台"); window.history.replaceState({}, "", "/coach"); }
       if (userRole === "admin") { setView("admin"); setActiveNavLabel("系统总览"); window.history.replaceState({}, "", "/admin"); }

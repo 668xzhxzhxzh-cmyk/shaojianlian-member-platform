@@ -4,7 +4,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -16,6 +15,7 @@ type PortalContextValue = {
   state: PortalState;
   loading: boolean;
   toasts: Toast[];
+  refresh: () => Promise<void>;
   notify: (message: string, tone?: Toast["tone"]) => void;
   addWater: (amount?: number) => void;
   toggleMeal: (id: string) => void;
@@ -41,24 +41,21 @@ async function persist(action: string, payload: Record<string, unknown>) {
 
 export function PortalProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<PortalState>(demoState);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  useEffect(() => {
-    let active = true;
-    fetch("/api/data")
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: unknown) => {
-        const result = data as { state?: PortalState } | null;
-        if (active && result?.state) setState(result.state);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/data", { credentials: "include" });
+      if (!response.ok) return;
+      const result = await response.json() as { state?: PortalState };
+      if (result.state) setState(result.state);
+    } catch {
+      // Keep the last usable state when the network is temporarily unavailable.
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const notify = useCallback(
@@ -176,6 +173,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
       state,
       loading,
       toasts,
+      refresh,
       notify,
       addWater,
       toggleMeal,
@@ -188,6 +186,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
       state,
       loading,
       toasts,
+      refresh,
       notify,
       addWater,
       toggleMeal,
