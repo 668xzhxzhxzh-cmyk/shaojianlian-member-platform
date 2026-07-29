@@ -1,0 +1,25 @@
+[Unit]
+Description=Shao Coach Web
+After=network-online.target shao-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shaoapp
+Group=shaoapp
+WorkingDirectory=/opt/shao-coach
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/default/shao-coach-web
+ExecStart=/usr/bin/npm run start:node -- --hostname 127.0.0.1 --port 3000
+Restart=always
+RestartSec=4
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+MemoryMax=650M
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+[Unit]
+Description=Shao Coach API
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=shaoapp
+Group=shaoapp
+WorkingDirectory=/opt/shao-coach
+EnvironmentFile=/opt/shao-coach/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/shao-coach/server/index.mjs
+Restart=always
+RestartSec=4
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+MemoryMax=550M
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

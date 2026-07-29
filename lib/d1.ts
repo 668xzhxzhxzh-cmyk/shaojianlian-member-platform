@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env } from "@/lib/cloudflare-env";
 import { demoState, type PortalState } from "./portal-data";
 
 const USER_ID = "member-li";

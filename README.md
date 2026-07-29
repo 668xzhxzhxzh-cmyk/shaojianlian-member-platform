@@ -57,6 +57,16 @@ sh scripts/deploy-aliyun.sh
 
 IP 验收阶段使用 `SITE_ADDRESS=http://公网IP`、`PUBLIC_URL=http://公网IP` 和 `COOKIE_SECURE=false`。域名备案并解析到 ECS 后，把地址改为备案域名、将 `COOKIE_SECURE` 设为 `true` 并重新运行部署脚本，Caddy 会自动申请 HTTPS 证书。
 
+### 中国内地轻量主机部署
+
+如果主机内存小于 4GB，或 Docker Hub 在境内网络超时，可采用当前生产机使用的原生方案：Node.js 22 + Nginx + PostgreSQL 16。前端使用 `npm run build:node` / `npm run start:node`，API 使用 `node server/index.mjs`；参考配置位于：
+
+- `deployment/shao-web.service`
+- `deployment/shao-api.service`
+- `deployment/nginx-ip.conf`
+
+生产目录固定为 `/opt/shao-coach`，`.env` 权限应为 `root:shaoapp 0640`；网站和 API 均只监听 `127.0.0.1`，公网仅由 Nginx 暴露 80/443。当前 IP 验收完成后，再替换 Nginx 配置中的域名并接入 HTTPS。
+
 ### 中国内地上线前必须完成
 
 1. 中国内地服务器对外提供网站服务前需完成 ICP 备案。
@@ -93,6 +103,12 @@ sh scripts/backup-postgres.sh
 gunzip -c backups/目标备份.sql.gz | docker compose exec -T postgres psql -U shao shao_platform
 ```
 
+原生 PostgreSQL 部署使用：
+
+```bash
+gunzip -c backups/目标备份.sql.gz | psql "$DATABASE_URL"
+```
+
 生产环境应至少完成一次恢复演练。
 
 ## 验证
@@ -100,6 +116,7 @@ gunzip -c backups/目标备份.sql.gz | docker compose exec -T postgres psql -U 
 ```bash
 npx tsc --noEmit
 npm test
+npm run build:node
 docker compose config
 ```
 
@@ -109,7 +126,7 @@ docker compose config
 - `components/`：响应式产品界面。
 - `server/`：阿里云生产 API、账号、PostgreSQL、Hermes 与推送。
 - `db/`、`drizzle/`：Sites D1 数据结构与迁移。
-- `deployment/`：Caddy 网关配置。
+- `deployment/`：Caddy、Nginx 与 systemd 生产配置。
 - `scripts/`：部署和备份。
 
 ## 交付说明
