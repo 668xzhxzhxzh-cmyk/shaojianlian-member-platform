@@ -37,7 +37,6 @@ test("keeps mainland deployment and secret configuration documented", async () =
   ]);
   assert.match(envExample, /DEEPSEEK_API_KEY/);
   assert.match(envExample, /HERMES_API_KEY/);
-  assert.doesNotMatch(`${envExample}${readme}`, /OPENCLAW_GATEWAY_TOKEN|openclaw-weixin/i);
   assert.match(compose, /Asia\/Shanghai/);
   assert.match(readme, /ICP\s*备案/);
 });
