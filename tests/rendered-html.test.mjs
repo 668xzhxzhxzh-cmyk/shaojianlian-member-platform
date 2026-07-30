@@ -15,21 +15,41 @@ test("builds the member portal without starter artifacts", async () => {
 });
 
 test("includes coach approval, native Hermes and WeCom AI Bot tooling", async () => {
-  const [coach, assistant, deepseek, tools, contact] = await Promise.all([
+  const [coach, admin, assistant, envExample, tools, contact] = await Promise.all([
+    readFile(new URL("../components/coach-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/assistant-view.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/agent/chat/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../.env.example", import.meta.url), "utf8"),
     readFile(new URL("../server/hermes_tools_mcp.py", import.meta.url), "utf8"),
     readFile(new URL("../server/wecom-contact.mjs", import.meta.url), "utf8"),
   ]);
-  assert.match(coach, /教练工作台/);
+  assert.match(coach, /会员档案/);
+  assert.match(coach, /训练方案设计/);
   assert.match(assistant, /Hermes Agent/);
-  assert.match(deepseek, /deepseek-v4-flash/);
-  assert.match(coach, /企业微信 AI Bot/);
+  assert.match(envExample, /DEEPSEEK_MODEL=deepseek-v4-flash/);
+  assert.match(admin, /企业微信 AI Bot/);
   assert.match(tools, /get_member_by_id/);
   assert.match(contact, /externalcontact\/add_msg_template/);
   assert.match(contact, /发送任务已创建，请在企业微信客户端确认发送。/);
   assert.doesNotMatch(`${assistant}${contact}`, /notifications\/weixin|WECOM_WEBHOOK_URL/);
+});
+
+test("keeps member booking private-only and coach AI access server-side", async () => {
+  const [portal, memberViews, coach, server] = await Promise.all([
+    readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/member-views.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/coach-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../server/index.mjs", import.meta.url), "utf8"),
+  ]);
+  const memberNavBlock = portal.slice(portal.indexOf("const memberNav"), portal.indexOf("const coachNav"));
+  assert.doesNotMatch(memberNavBlock, /assistant|Hermes|智能助理/);
+  assert.match(memberViews, /length: 13/);
+  assert.match(memberViews, /节私教/);
+  assert.match(memberViews, /仅一对一私教/);
+  assert.match(coach, /coach-training/);
+  assert.match(coach, /coach-nutrition/);
+  assert.match(coach, /coach-body/);
+  assert.match(server, /Hermes 仅供教练与管理员使用/);
 });
 
 test("keeps mainland deployment and secret configuration documented", async () => {

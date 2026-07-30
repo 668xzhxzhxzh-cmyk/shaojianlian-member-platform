@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "邵教练专属会员平台",
     short_name: "邵教练会员",
-    description: "训练、饮食、打卡、身体数据、预约与 Hermes 智能健康助理。",
+    description: "一对一训练、饮食、打卡、身体数据与私教预约。",
     start_url: "/",
     display: "standalone",
     background_color: "#fbfaf6",

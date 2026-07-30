@@ -37,13 +37,13 @@ const seedState = {
   checkinDates: ["07/23", "07/24", "07/25", "07/26", "07/27", "07/28"],
   streak: 18,
   bookings: [
-    { id: "b1", day: "周一", date: "7/27", time: "10:00–11:00", title: "力量基础课", coach: "邵教练", status: "已完成" },
-    { id: "b2", day: "周二", date: "7/28", time: "10:00–10:45", title: "HIIT 燃脂课", coach: "邵教练", status: "已完成" },
-    { id: "b3", day: "周三", date: "7/29", time: "10:00–11:00", title: "下肢力量课", coach: "邵教练", status: "已预约" },
-    { id: "b4", day: "周四", date: "7/30", time: "14:00–15:00", title: "功能训练", coach: "邵教练", status: "待确认" },
-    { id: "b5", day: "周五", date: "7/31", time: "18:00–19:00", title: "核心强化课", coach: "邵教练", status: "可预约" },
-    { id: "b6", day: "周六", date: "8/1", time: "18:00–19:00", title: "一对一私教", coach: "邵教练", status: "可预约" },
-    { id: "b7", day: "周日", date: "8/2", time: "10:00–11:00", title: "伸展放松课", coach: "邵教练", status: "可预约" },
+    { id: "b1", day: "周一", date: "7/27", time: "09:00–10:00", title: "一对一私教", coach: "邵教练", status: "已完成" },
+    { id: "b2", day: "周二", date: "7/28", time: "11:00–12:00", title: "一对一私教", coach: "邵教练", status: "已完成" },
+    { id: "b3", day: "周三", date: "7/29", time: "10:00–11:00", title: "一对一私教", coach: "邵教练", status: "已预约" },
+    { id: "b4", day: "周四", date: "7/30", time: "14:00–15:00", title: "一对一私教", coach: "邵教练", status: "待确认" },
+    { id: "b5", day: "周五", date: "7/31", time: "18:00–19:00", title: "一对一私教", coach: "邵教练", status: "可预约" },
+    { id: "b6", day: "周六", date: "8/1", time: "16:00–17:00", title: "一对一私教", coach: "邵教练", status: "可预约" },
+    { id: "b7", day: "周日", date: "8/2", time: "10:00–11:00", title: "一对一私教", coach: "邵教练", status: "可预约" },
   ],
   suggestions: [
     { id: "s1", member: "李明", avatar: "李", title: "减脂专项调整", category: "训练调整", content: "近 7 天训练完成率下降，建议将上肢推举强度下调 10%，保持下肢训练强度，并安排一次肩部放松评估。", status: "待确认", priority: "重要" },
@@ -94,7 +94,9 @@ const server = createServer(async (request, response) => {
     if (request.method !== "GET" && !sameOrigin(request)) return json(response, 403, { error: "请求来源无效" });
 
     if (url.pathname === "/api/data" && request.method === "GET") {
-      const state = await readPortalState(session);
+      const requestedMemberId = url.searchParams.get("member_id");
+      const state = await readPortalState(session, requestedMemberId);
+      if (!state) return json(response, 404, { error: "找不到该会员" });
       return json(response, 200, { state });
     }
     if (url.pathname === "/api/users" && request.method === "GET") return listUsers(response, session);
@@ -284,10 +286,14 @@ async function readSession(request) {
   }
 }
 
-async function readPortalState(session) {
-  const userId = session.role === "member" ? session.id : "member-li";
+async function readPortalState(session, requestedMemberId = null) {
+  const userId = session.role === "member" ? session.id : String(requestedMemberId || "member-li");
+  if (session.role !== "member") {
+    const member = await pool.query("SELECT id FROM users WHERE id=$1 AND role='member' AND status='active'", [userId]);
+    if (!member.rows[0]) return null;
+  }
   const result = await pool.query("SELECT state_json FROM portal_state WHERE user_id=$1", [userId]);
-  return result.rows[0]?.state_json || seedState;
+  return result.rows[0]?.state_json || (userId === "member-li" ? seedState : null);
 }
 
 async function writePortalState(userId, state) {
@@ -366,7 +372,15 @@ async function handleAction(request, response, session) {
 }
 
 async function handleHermes(request, response, session) {
+  if (!["coach", "admin"].includes(session.role)) {
+    await audit(session.id, "hermes_chat_denied", { role: session.role });
+    return json(response, 403, { error: "Hermes 仅供教练与管理员使用" });
+  }
   const body = await readJson(request);
+  const memberId = String(body.member_id || "").trim();
+  if (!memberId) return json(response, 400, { error: "必须提供 member_id，禁止根据昵称猜测会员" });
+  const memberState = await readPortalState(session, memberId);
+  if (!memberState) return json(response, 404, { error: "找不到该 member_id 对应的会员" });
   const messages = Array.isArray(body.messages) ? body.messages.slice(-20).filter((item) => ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.length <= 4000) : [];
   if (!messages.length) return json(response, 400, { error: "请输入问题" });
   if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) return json(response, 503, { error: "原生 Hermes API 尚未配置" });
@@ -392,7 +406,7 @@ async function handleHermes(request, response, session) {
     body: JSON.stringify({
       model: "hermes-agent",
       stream: true,
-      messages: [{ role: "system", content: hermesPrompt }, { role: "system", content: `以下是只读会员数据：${JSON.stringify({ member: body.member, bodyMetrics: body.bodyMetrics, meals: body.meals }).slice(0, 12000)}` }, ...messages],
+      messages: [{ role: "system", content: hermesPrompt }, { role: "system", content: `以下是 member_id=${memberId} 的只读会员数据：${JSON.stringify({ member: memberState.profile, bodyMetrics: memberState.bodyMetrics, meals: memberState.meals }).slice(0, 12000)}` }, ...messages],
     }),
     signal: AbortSignal.timeout(120000),
   });
@@ -421,7 +435,7 @@ async function handleHermes(request, response, session) {
     }
   }
   response.end();
-  await audit(session.id, "hermes_chat", { messageCount: messages.length });
+  await audit(session.id, "hermes_chat", { memberId, messageCount: messages.length });
 }
 
 async function audit(actorId, action, detail) {

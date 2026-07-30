@@ -42,6 +42,7 @@ export function StatCard({
   suffix,
   note,
   accent = "green",
+  onClick,
 }: {
   icon: LucideIcon;
   label: string;
@@ -49,9 +50,10 @@ export function StatCard({
   suffix?: string;
   note?: string;
   accent?: "green" | "amber" | "red" | "slate";
+  onClick?: () => void;
 }) {
-  return (
-    <Card className={`stat-card accent-${accent}`}>
+  const content = (
+    <>
       <div className="stat-icon"><Icon size={22} strokeWidth={1.7} /></div>
       <div>
         <span className="muted">{label}</span>
@@ -61,8 +63,12 @@ export function StatCard({
         </div>
         {note ? <span className="stat-note">{note}</span> : null}
       </div>
-    </Card>
+    </>
   );
+  if (onClick) {
+    return <button type="button" className={`card stat-card stat-card-link accent-${accent}`} onClick={onClick}>{content}</button>;
+  }
+  return <Card className={`stat-card accent-${accent}`}>{content}</Card>;
 }
 
 export function ProgressBar({

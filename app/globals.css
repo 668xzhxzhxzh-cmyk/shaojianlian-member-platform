@@ -566,6 +566,166 @@ button.table-row:hover { background: #faf9f4; }
 .legal-page h2 { margin: 28px 0 9px; }
 .legal-page article > p:not(.legal-lead) { color: var(--muted); line-height: 2; }
 
+/* 2026 private-coaching experience */
+.stat-card-link { width: 100%; color: inherit; text-align: left; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.stat-card-link:hover { transform: translateY(-2px); border-color: #bdc4af; box-shadow: 0 18px 40px rgba(48,53,39,.09); }
+.stat-card-link:focus-visible, .member-service-card:focus-visible, .booking-time-grid button:focus-visible { outline: 3px solid rgba(63,77,49,.18); outline-offset: 2px; }
+.inline-editor { scroll-margin-top: 105px; display: grid; grid-template-columns: minmax(220px,.8fr) minmax(500px,1.2fr); align-items: center; gap: clamp(22px,4vw,65px); padding: clamp(22px,4vw,38px); border-left: 4px solid var(--green); }
+.inline-editor > div p { max-width: 560px; margin-top: 8px; color: var(--muted); line-height: 1.8; }
+.inline-editor form { min-width: 0; }
+.inline-editor form > label { display: grid; gap: 7px; font-weight: 700; }
+.inline-editor input, .inline-editor textarea { width: 100%; min-height: 46px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; outline: 0; }
+.inline-editor form > .button { margin-top: 14px; min-width: 180px; }
+.body-record-editor { align-items: start; }
+.body-record-editor .form-grid { margin: 0; }
+
+.booking-calendar-card { overflow: hidden; }
+.booking-toolbar-new { padding-bottom: 15px; border-bottom: 1px solid var(--line); }
+.period-switcher { display: flex; align-items: center; justify-content: center; gap: 13px; }
+.period-switcher .icon-button { width: 34px; height: 34px; }
+.private-only { display: inline-flex; align-items: center; gap: 6px; padding: 7px 11px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 11px; font-weight: 800; white-space: nowrap; }
+.booking-grid-scroll { overflow: auto; margin: 0 -4px; padding: 4px; scrollbar-color: #c3c8b9 transparent; }
+.booking-time-grid { min-width: 790px; display: grid; grid-template-columns: 64px repeat(7,minmax(98px,1fr)); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--card); }
+.booking-grid-corner, .booking-time-grid > button { min-height: 66px; padding: 9px; display: grid; place-items: center; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #f7f6f1; }
+.booking-grid-corner { color: var(--muted); font-size: 11px; }
+.booking-time-grid > button { position: relative; gap: 1px; }
+.booking-time-grid > button span { color: var(--muted); font-size: 11px; }
+.booking-time-grid > button b { font: 17px/1.2 Georgia,serif; }
+.booking-time-grid > button em { position: absolute; top: 6px; right: 6px; color: var(--green); font-size: 9px; font-style: normal; }
+.booking-time-grid > button.active { background: var(--green-soft); color: var(--green); }
+.booking-grid-row { display: contents; }
+.booking-grid-row > time { min-height: 72px; padding: 10px 8px; text-align: right; color: var(--muted); font: 11px/1 system-ui; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #fbfaf6; }
+.booking-grid-cell { position: relative; min-height: 72px; padding: 4px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: linear-gradient(to bottom, transparent 50%, rgba(231,228,218,.42) 50%, rgba(231,228,218,.42) calc(50% + 1px), transparent calc(50% + 1px)); }
+.booking-grid-cell:nth-child(8n) { border-right: 0; }
+.private-session { width: 100%; min-height: 62px; display: grid; align-content: start; gap: 1px; padding: 7px 9px; text-align: left; border: 1px solid #cfd5c5; border-radius: 8px; background: var(--green-soft); color: var(--green); }
+.private-session span, .private-session small, .private-session em { font-size: 9px; font-style: normal; }
+.private-session b { font-size: 11px; }
+.private-session em { margin-top: 2px; font-weight: 800; }
+.private-session.status-已预约 { background: var(--green) !important; border-color: var(--green); color: white !important; }
+.private-session.status-已预约 small { color: #dbe1d3; }
+.private-session.status-待确认 { background: var(--amber-soft) !important; border-color: #e5cfae; color: #7b5e33 !important; }
+.private-session.status-已完成 { background: #f0f1ec !important; border-color: #dfe1da; color: #65695f !important; }
+.private-session.status-可预约 { background: #fff !important; border-style: dashed; }
+.private-session.status-可预约:hover { background: var(--green-soft) !important; border-style: solid; }
+.booking-mobile-agenda { display: none; }
+.booking-month-head { display: grid; grid-template-columns: repeat(7,1fr); color: var(--muted); text-align: center; font-size: 11px; }
+.booking-month-head span { padding: 9px; }
+.booking-month.booking-month-new { grid-template-columns: repeat(7,minmax(0,1fr)); }
+.booking-month-new .month-empty { min-height: 112px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #faf9f5; }
+.booking-month-new > button { min-height: 112px; position: relative; gap: 5px; }
+.booking-month-new > button > span { font: 17px/1 Georgia,serif; }
+.booking-month-new > button > b { color: var(--green); font-size: 11px; }
+.booking-month-new > button > em { width: fit-content; margin-top: auto; }
+.booking-month-new > button.next-month { opacity: .55; }
+.booking-month-new > button:hover { box-shadow: inset 0 0 0 2px rgba(63,77,49,.35); }
+
+.coach-workspace { max-width: 1440px; margin: 0 auto; }
+.coach-hero-row, .coach-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 8px 1px 3px; }
+.coach-hero-row p, .coach-section-heading p { color: var(--muted); margin-top: 7px; }
+.coach-overview-grid { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(320px,.75fr); gap: 14px; }
+.coach-timeline { display: grid; }
+.coach-timeline > button { min-height: 67px; display: grid; grid-template-columns: 55px 18px 34px 1fr auto 20px; align-items: center; gap: 10px; padding: 8px 2px; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: transparent; }
+.coach-timeline > button:last-child { border-bottom: 0; }
+.coach-timeline > button:hover { background: #faf9f4; }
+.coach-timeline > button time { color: var(--muted); font: 13px Georgia,serif; }
+.coach-timeline > button > i { position: relative; width: 9px; height: 9px; border: 2px solid #c9cbc4; border-radius: 50%; }
+.coach-timeline > button > i::after { content: ""; position: absolute; top: 9px; left: 2px; width: 1px; height: 52px; background: var(--line); }
+.coach-timeline > button:last-child > i::after { display: none; }
+.coach-timeline > button > i.done { border-color: var(--green); background: var(--green); }
+.coach-timeline > button > i.active { border-color: var(--amber); box-shadow: 0 0 0 4px var(--amber-soft); }
+.coach-timeline > button > span { display: grid; }
+.coach-timeline > button > em { padding: 3px 8px; border-radius: 999px; background: #f1f0eb; color: var(--muted); font-size: 10px; font-style: normal; }
+.priority-list { display: grid; }
+.priority-list > button { min-height: 75px; display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 10px; padding: 10px 0; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: transparent; }
+.priority-list > button:last-child { border-bottom: 0; }
+.priority-list > button > svg { color: var(--green); }
+.priority-list > button > span { display: grid; }
+.priority-list > button > em { color: var(--amber); font-size: 10px; font-style: normal; }
+.member-snapshot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.member-snapshot-grid > button { padding: 15px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: #fbfaf6; }
+.member-snapshot-grid > button:hover { border-color: #bcc4ae; background: var(--green-soft); }
+.member-snapshot-grid > button > div:first-child { display: grid; grid-template-columns: 42px 1fr auto; align-items: center; gap: 9px; }
+.member-snapshot-grid > button > div:first-child > span { display: grid; }
+.member-snapshot-grid > button > p { margin: 13px 0 9px; color: #4f534a; }
+.snapshot-metrics { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; padding-top: 9px; border-top: 1px solid var(--line); }
+.snapshot-metrics span { display: grid; color: var(--muted); font-size: 9px; }
+.snapshot-metrics b { color: var(--ink); font-size: 11px; }
+.quality-list { display: grid; gap: 15px; margin-bottom: 19px; }
+.quality-row { margin: 10px 0; }
+
+.member-context-bar { scroll-margin-top: 90px; display: grid; grid-template-columns: minmax(250px,1fr) minmax(220px,.75fr) minmax(420px,1.35fr) auto; align-items: center; gap: 20px; padding: 18px 20px; border: 1px solid #dce0d5; border-radius: 15px; background: linear-gradient(120deg,#f1f3eb,#fffefa); box-shadow: var(--shadow); }
+.member-context-profile { display: flex; align-items: center; gap: 12px; }
+.member-context-profile > div { display: grid; }
+.member-context-profile h2 { font-family: "Songti SC",serif; font-size: 23px; }
+.member-context-bar > label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+.member-context-bar select { min-height: 42px; }
+.member-context-metrics { display: grid; grid-template-columns: 1.4fr .7fr 1fr; gap: 10px; }
+.member-context-metrics span { display: grid; padding: 0 10px; border-left: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.member-context-metrics b { color: var(--ink); font-size: 12px; }
+
+.coach-members-layout { display: grid; grid-template-columns: minmax(340px,.75fr) minmax(0,1.45fr); gap: 14px; }
+.member-directory-head > div { display: grid; grid-template-columns: 1fr 140px; gap: 8px; }
+.member-directory-head label { display: flex; align-items: center; gap: 7px; min-height: 41px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.member-directory-head input { width: 100%; border: 0; outline: 0; }
+.member-directory-list { display: grid; margin-top: 15px; }
+.member-directory-list > button { min-height: 83px; display: grid; grid-template-columns: 42px 1fr auto 18px; align-items: center; gap: 10px; padding: 10px 7px; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: transparent; }
+.member-directory-list > button.active { margin: 4px 0; padding: 10px; border: 1px solid #cbd1c1; border-radius: 11px; background: var(--green-soft); }
+.member-directory-list > button > span, .member-directory-list > button > div { display: grid; }
+.member-directory-list > button > div { justify-items: end; gap: 5px; }
+.member-record { display: grid; align-content: start; gap: 14px; }
+.member-record-hero > div:first-child { display: flex; align-items: center; gap: 14px; }
+.member-record-hero > div:first-child > span { display: grid; }
+.record-hero-stats { display: grid; grid-template-columns: 1.35fr 1fr 1fr 1fr; gap: 10px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.record-hero-stats span { display: grid; color: var(--muted); font-size: 10px; }
+.record-hero-stats b { color: var(--ink); font-size: 13px; }
+.member-service-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+.member-service-card { width: 100%; display: grid; grid-template-columns: 42px 1fr 20px; align-items: center; gap: 11px; padding: 17px; text-align: left; }
+.member-service-card > span { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: var(--green-soft); color: var(--green); }
+.member-service-card > div { display: grid; gap: 3px; }
+.member-service-card p { color: #55594f; font-size: 11px; }
+.member-service-card:hover { border-color: #bdc4af; }
+.record-activity-list { display: grid; }
+.record-activity-list p { display: grid; grid-template-columns: 32px 1fr; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.record-activity-list p:last-child { border-bottom: 0; }
+.record-activity-list p > span { display: grid; }
+
+.coach-schedule-card { overflow: hidden; }
+.coach-week-board { min-width: 1010px; display: grid; grid-template-columns: repeat(7,1fr); gap: 7px; overflow-x: auto; padding-bottom: 5px; }
+.coach-week-board > section { min-width: 135px; display: grid; align-content: start; gap: 7px; padding: 8px; border: 1px solid var(--line); border-radius: 11px; background: #faf9f5; }
+.coach-week-board header { display: grid; text-align: center; padding: 8px; }
+.coach-week-board section > button { min-height: 84px; display: grid; align-content: start; gap: 2px; padding: 9px; text-align: left; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.coach-week-board section > button.open { place-items: center; align-content: center; border-style: dashed; color: var(--green); }
+.coach-week-board section > button time { color: var(--muted); font-size: 10px; }
+.coach-week-board section > button b { font-size: 11px; }
+
+.coach-design-grid { display: grid; grid-template-columns: minmax(0,1.65fr) minmax(310px,.65fr); gap: 14px; }
+.plan-summary-grid { display: grid; grid-template-columns: 1fr .6fr 1.4fr; gap: 10px; margin-bottom: 17px; }
+.plan-summary-grid label, .nutrition-designer-form label, .feedback-form-card label { display: grid; gap: 6px; font-weight: 700; }
+.plan-summary-grid input, .plan-summary-grid select, .nutrition-designer-form input, .nutrition-designer-form textarea, .feedback-form-card input, .feedback-form-card textarea, .coach-note-panel textarea { width: 100%; min-height: 43px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: #fff; outline: 0; resize: vertical; }
+.plan-day-list { display: grid; gap: 10px; }
+.plan-day-list > section { padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: #fbfaf6; }
+.plan-day-list header { display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 10px; margin-bottom: 11px; }
+.plan-day-list header > span { width: 35px; height: 35px; display: grid; place-items: center; border-radius: 50%; background: var(--green); color: #fff; font: 12px Georgia,serif; }
+.plan-day-list section > div { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.plan-day-list section > div label { display: grid; grid-template-columns: 18px 1fr; align-items: center; gap: 7px; color: var(--green); }
+.plan-day-list section > div input { min-height: 38px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: #fff; }
+.plan-save-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 18px; padding-top: 17px; border-top: 1px solid var(--line); }
+.plan-save-row > span { display: flex; align-items: center; gap: 7px; color: var(--amber); font-size: 11px; }
+.evidence-compact { display: grid; }
+.evidence-compact p { display: grid; grid-template-columns: 30px 1fr; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.evidence-compact p > span { display: grid; }
+.nutrition-targets { display: grid; grid-template-columns: repeat(4,1fr); gap: 9px; margin-bottom: 18px; }
+.nutrition-targets label { position: relative; }
+.nutrition-targets label small { position: absolute; right: 10px; bottom: 13px; }
+.coach-meal-plan { display: grid; }
+.coach-meal-plan label { display: grid; grid-template-columns: 85px 1fr 80px; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.coach-meal-plan label > span { display: grid; }
+.coach-meal-plan label > em { color: var(--muted); font-size: 11px; font-style: normal; text-align: right; }
+.nutrition-designer-form .full-note { margin: 17px 0; }
+.risk-summary { display: flex; align-items: start; gap: 9px; padding: 12px; margin-bottom: 15px; border-radius: 10px; background: var(--amber-soft); }
+.risk-summary p { color: #6f604c; line-height: 1.7; }
+.feedback-form-card label { margin: 13px 0; }
+
 @media (max-width: 1380px) {
   .desktop-top-nav { gap: 18px; }
   .brand small, .profile-trigger small { display: none; }
@@ -690,6 +850,74 @@ button.table-row:hover { background: #faf9f4; }
   .login-trust { display: none; }
   .login-form-panel { padding: 18px 14px 35px; margin-top: -30px; position: relative; z-index: 2; }
   .login-form { padding: 24px 20px; }
+}
+
+@media (max-width: 1100px) {
+  .inline-editor { grid-template-columns: 1fr; }
+  .coach-overview-grid, .coach-members-layout, .coach-design-grid { grid-template-columns: 1fr; }
+  .member-context-bar { grid-template-columns: 1fr 1fr; }
+  .member-context-metrics { grid-column: span 2; }
+  .coach-week-board { overflow: visible; }
+  .coach-schedule-card { overflow-x: auto; }
+}
+
+@media (max-width: 720px) {
+  .stat-card-link { min-height: 126px; }
+  .inline-editor { scroll-margin-top: 74px; gap: 20px; padding: 19px 15px; }
+  .inline-editor form > .button { width: 100%; }
+  .booking-calendar-card { padding: 14px 10px; }
+  .booking-toolbar-new { gap: 12px; }
+  .period-switcher { width: 100%; }
+  .period-switcher strong { flex: 1; font-size: 12px; }
+  .private-only { align-self: center; }
+  .booking-grid-scroll { display: none; }
+  .booking-mobile-agenda { display: block; }
+  .booking-day-strip { display: grid; grid-template-columns: repeat(7,1fr); gap: 4px; padding: 4px 0 13px; border-bottom: 1px solid var(--line); }
+  .booking-day-strip button { position: relative; min-height: 57px; display: grid; place-items: center; align-content: center; gap: 1px; border: 0; border-radius: 10px; background: transparent; }
+  .booking-day-strip button span { color: var(--muted); font-size: 9px; }
+  .booking-day-strip button b { font: 15px Georgia,serif; }
+  .booking-day-strip button.active { background: var(--green); color: white; }
+  .booking-day-strip button.active span { color: #dfe5d8; }
+  .booking-day-strip button i { position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--amber); }
+  .mobile-agenda-list { display: grid; }
+  .mobile-agenda-list > div { min-height: 62px; display: grid; grid-template-columns: 55px 1fr; align-items: start; gap: 9px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+  .mobile-agenda-list > div > time { padding-top: 6px; color: var(--muted); font: 11px Georgia,serif; }
+  .mobile-agenda-list > div > span { padding-top: 6px; color: #a3a49e; font-size: 10px; }
+  .mobile-agenda-list .private-session { min-height: 70px; }
+  .booking-month.booking-month-new { grid-template-columns: repeat(7,minmax(0,1fr)); }
+  .booking-month-new .month-empty, .booking-month-new > button { min-height: 72px; padding: 6px 4px; }
+  .booking-month-new > button:nth-child(4n) { border-right: 1px solid var(--line); }
+  .booking-month-new > button:nth-child(7n) { border-right: 0; }
+  .booking-month-new > button > span { font-size: 13px; }
+  .booking-month-new > button > b { font-size: 8px; line-height: 1.2; }
+  .booking-month-new > button > small { display: none; }
+  .booking-month-new > button > em { max-width: 100%; padding: 1px 3px; overflow: hidden; font-size: 7px; white-space: nowrap; }
+  .booking-month-head span { padding: 6px 1px; font-size: 9px; }
+  .coach-hero-row, .coach-section-heading { align-items: stretch; flex-direction: column; gap: 13px; }
+  .coach-hero-row .inline-actions, .coach-section-heading .inline-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .coach-hero-row .inline-actions .button { padding: 0 10px; }
+  .coach-overview-grid { gap: 10px; }
+  .coach-overview-grid .span-2 { grid-column: auto; }
+  .coach-timeline > button { grid-template-columns: 45px 10px 30px 1fr auto; gap: 7px; }
+  .coach-timeline > button > em { display: none; }
+  .coach-timeline > button > svg { display: none; }
+  .member-snapshot-grid { grid-template-columns: 1fr; }
+  .member-context-bar { grid-template-columns: 1fr; gap: 14px; padding: 15px; }
+  .member-context-metrics { grid-column: auto; grid-template-columns: 1fr 1fr; }
+  .member-context-metrics span:first-child { grid-column: span 2; }
+  .member-context-bar > .text-button { justify-self: start; }
+  .member-directory-head > div { grid-template-columns: 1fr; }
+  .member-directory-list > button { grid-template-columns: 38px 1fr auto; }
+  .member-directory-list > button > svg { display: none; }
+  .record-hero-stats { grid-template-columns: 1fr 1fr; }
+  .member-service-grid { grid-template-columns: 1fr; }
+  .plan-summary-grid, .nutrition-targets { grid-template-columns: 1fr 1fr; }
+  .plan-summary-grid label:last-child { grid-column: span 2; }
+  .plan-day-list section > div { grid-template-columns: 1fr; }
+  .plan-save-row { align-items: stretch; flex-direction: column; }
+  .coach-meal-plan label { grid-template-columns: 70px 1fr; }
+  .coach-meal-plan label > em { grid-column: 2; text-align: left; }
+  .coach-design-grid .span-2 { grid-column: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {
