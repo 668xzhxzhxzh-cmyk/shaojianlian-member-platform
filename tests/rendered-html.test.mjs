@@ -139,6 +139,11 @@ test("ships the final responsive member polish and simplified admin navigation",
   assert.doesNotMatch(adminNavBlock, /教练运营/);
   assert.match(admin, /admin-settings-layout/);
   assert.match(admin, /integration-status-grid/);
+  assert.match(admin, /fetch\("\/health"/);
+  assert.match(admin, /hermesMemberTools/);
+  assert.match(admin, /wecomContact/);
+  assert.match(admin, /IntegrationBadge/);
+  assert.match(css, /\.integration-status-grid em\.warning/);
   assert.match(css, /@media \(max-width: 720px\)/);
   assert.match(css, /\.admin-settings-layout \{ grid-template-columns: 1fr; \}/);
 });

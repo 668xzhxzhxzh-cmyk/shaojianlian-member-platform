@@ -154,6 +154,15 @@ function Task({ icon: Icon, label, count, onClick }: { icon: typeof MessageCircl
 
 type AdminSection = "overview" | "ai-suggestions" | "notifications" | "users" | "settings";
 type AdminUser = { id: string; name: string; role: string; phone: string; status: string };
+type IntegrationHealth = {
+  deepseek: boolean | null;
+  memberTools: boolean | null;
+  wecomContact: boolean | null;
+};
+
+function IntegrationBadge({ value, ready, unavailable }: { value: boolean | null; ready: string; unavailable: string }) {
+  return <em className={value === false ? "warning" : value === null ? "pending" : ""}>{value === null ? "检测中" : value ? ready : unavailable}</em>;
+}
 
 export function AdminView({ section = "overview" }: { section?: AdminSection }) {
   const { state, notify, updateSuggestion } = usePortal();
@@ -174,7 +183,12 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
     { id: "n3", title: "会员身体数据已更新", detail: "张伟新增体重与体脂记录", read: true },
   ]);
   const [settings, setSettings] = useState({ city: "鄂州", timezone: "Asia/Shanghai", hermesAutoSync: true, memberRegistration: true });
+  const [integrationHealth, setIntegrationHealth] = useState<IntegrationHealth>({ deepseek: null, memberTools: null, wecomContact: null });
   const visibleUsers = users.filter((user) => !search || `${user.name}${user.role}${user.phone}${user.status}`.includes(search));
+  const integrationValues = Object.values(integrationHealth);
+  const healthyIntegrationCount = integrationValues.filter((value) => value === true).length;
+  const integrationHealthPending = integrationValues.some((value) => value === null);
+  const integrationHealthDegraded = integrationValues.some((value) => value === false);
 
   useEffect(() => {
     fetch("/api/users", { credentials: "include" })
@@ -190,6 +204,33 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
       })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/health", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("health unavailable");
+        const result = await response.json() as {
+          integrations?: { deepseek?: boolean; hermesMemberTools?: boolean; wecomContact?: boolean };
+        };
+        setIntegrationHealth({
+          deepseek: Boolean(result.integrations?.deepseek),
+          memberTools: Boolean(result.integrations?.hermesMemberTools),
+          wecomContact: Boolean(result.integrations?.wecomContact),
+        });
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setIntegrationHealth({ deepseek: false, memberTools: false, wecomContact: false });
+      });
+    return () => controller.abort();
+  }, []);
+
+  function showIntegrationStatus(label: string, value: boolean | null) {
+    if (value === null) notify(`${label}状态正在检测`, "info");
+    else if (value) notify(`${label}运行正常`);
+    else notify(`${label}尚未完成生产配置`, "warning");
+  }
 
   function exportData() {
     const csv = "\uFEFF姓名,角色,手机号,状态\n" + visibleUsers.map((user) => [user.name, user.role, user.phone, user.status].map((value) => `"${value}"`).join(",")).join("\n");
@@ -316,22 +357,30 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
             </div>
           </Card>
           <Card className="integration-status-card">
-            <SectionTitle title="集成状态" action={<span className="integration-overall"><i /> 3 项服务正常</span>} />
+            <SectionTitle
+              title="集成状态"
+              action={(
+                <span className={`integration-overall${integrationHealthPending ? " pending" : integrationHealthDegraded ? " warning" : ""}`}>
+                  <i />
+                  {integrationHealthPending ? "正在检测生产服务" : `${healthyIntegrationCount}/3 项服务正常`}
+                </span>
+              )}
+            />
             <div className="integration-status-grid">
-              <button onClick={() => notify("DeepSeek 连接正常")}>
+              <button onClick={() => showIntegrationStatus("DeepSeek", integrationHealth.deepseek)}>
                 <span className="integration-icon"><Sparkles size={21} /></span>
                 <span><b>AI 分析服务</b><small>DeepSeek V4 Flash</small></span>
-                <em>运行正常</em><ArrowRight size={16} />
+                <IntegrationBadge value={integrationHealth.deepseek} ready="运行正常" unavailable="未配置" /><ArrowRight size={16} />
               </button>
-              <button onClick={() => notify("AI 网站管理工具已启用")}>
+              <button onClick={() => showIntegrationStatus("AI 网站管理工具", integrationHealth.memberTools)}>
                 <span className="integration-icon"><Bot size={21} /></span>
                 <span><b>AI 控制工具</b><small>课程、训练与饮食同步</small></span>
-                <em>已启用</em><ArrowRight size={16} />
+                <IntegrationBadge value={integrationHealth.memberTools} ready="已启用" unavailable="未配置" /><ArrowRight size={16} />
               </button>
-              <button onClick={() => notify("企业微信客户联系接口状态正常")}>
+              <button onClick={() => showIntegrationStatus("企业微信客户联系接口", integrationHealth.wecomContact)}>
                 <span className="integration-icon"><MessageCircleMore size={21} /></span>
                 <span><b>企业微信</b><small>官方客户联系接口</small></span>
-                <em>已接入</em><ArrowRight size={16} />
+                <IntegrationBadge value={integrationHealth.wecomContact} ready="已接入" unavailable="待配置" /><ArrowRight size={16} />
               </button>
             </div>
             <p className="integration-footnote"><ShieldCheck size={16} /> 所有管理操作均记录审计日志，会员消息仍需教练确认发送。</p>
