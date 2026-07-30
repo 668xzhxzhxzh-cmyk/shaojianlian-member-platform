@@ -10,12 +10,19 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from mcp.server.fastmcp import FastMCP
 
+
+# FastMCP's settings loader probes ".env" in the process working directory.
+# Hermes may launch the MCP probe from the website directory, whose production
+# .env is intentionally unreadable to the hermes user. Keep this stdio server
+# in its own non-secret tool directory before FastMCP initializes.
+os.chdir(Path(__file__).resolve().parent)
 
 API_URL = os.environ.get(
     "SHAO_INTERNAL_API_URL",
