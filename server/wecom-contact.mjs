@@ -22,10 +22,10 @@ export function createWecomContactService({ pool }) {
 
   async function handleInternalTool(request, response) {
     if (!LOOPBACK_ADDRESSES.has(String(request.socket.remoteAddress || ""))) {
-      return sendJson(response, 403, { error: "Hermes 管理工具仅允许服务器回环调用" });
+      return sendJson(response, 403, { error: "AI 管理工具仅允许服务器回环调用" });
     }
     if (!toolsConfigured || !hasValidBearer(request, toolToken)) {
-      return sendJson(response, 401, { error: "Hermes 管理工具凭证无效" });
+      return sendJson(response, 401, { error: "AI 管理工具凭证无效" });
     }
 
     const body = await readJson(request);
@@ -98,7 +98,7 @@ export function createWecomContactService({ pool }) {
       const task = await syncSendTaskStatus(body.task_id, coachUserId);
       return sendJson(response, 200, { task });
     }
-    return sendJson(response, 400, { error: "不支持的 Hermes 管理工具操作" });
+    return sendJson(response, 400, { error: "不支持的 AI 管理工具操作" });
   }
 
   async function getMemberById(rawMemberId, coachUserId) {
@@ -210,7 +210,7 @@ export function createWecomContactService({ pool }) {
       goal: normalizeText(body.goal || current.goal || "保持稳定训练", "训练目标", 160),
       frequency: Math.min(7, Math.max(1, Number(body.frequency || current.frequency || 3))),
       focus: normalizeText(body.focus || current.focus || "动作质量", "训练重点", 180),
-      note: normalizeText(body.note || current.note || "由 Hermes 按教练指令更新", "教练备注", 500),
+      note: normalizeText(body.note || current.note || "由 AI 按教练指令更新", "教练备注", 500),
       days: days || [],
       updatedAt: new Date().toISOString().slice(0, 10),
     };
@@ -507,7 +507,7 @@ export function createWecomContactService({ pool }) {
   function requireCoachUserId(rawCoachUserId) {
     const coachUserId = normalizeId(rawCoachUserId, "coach_userid", 128);
     if (!allowedCoachUserIds.has(coachUserId)) {
-      throw publicError(403, "该企业微信 userid 没有 Hermes 管理工具权限");
+      throw publicError(403, "该企业微信 userid 没有 AI 管理工具权限");
     }
     return coachUserId;
   }

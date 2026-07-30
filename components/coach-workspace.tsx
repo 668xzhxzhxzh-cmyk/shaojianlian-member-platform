@@ -52,11 +52,18 @@ type CoachWorkspaceProps = {
 };
 
 const coachSchedule = [
-  { time: "08:00", member: "李明远", focus: "下肢力量与髋稳定", status: "已完成" },
-  { time: "09:30", member: "王雨桐", focus: "体态评估与肩颈松解", status: "待开始" },
-  { time: "11:00", member: "张小北", focus: "上肢拉力与核心", status: "待开始" },
-  { time: "14:00", member: "陈思颖", focus: "核心重建", status: "待开始" },
-  { time: "16:00", member: "刘一航", focus: "膝关节活动度", status: "待确认" },
+  { id: "cs-1", date: "07/31", day: "今天", time: "08:00", member: "李明远", focus: "下肢力量与髋稳定", status: "已完成" },
+  { id: "cs-2", date: "07/31", day: "今天", time: "09:30", member: "王雨桐", focus: "体态评估与肩颈松解", status: "待开始" },
+  { id: "cs-3", date: "07/31", day: "今天", time: "11:00", member: "张小北", focus: "上肢拉力与核心", status: "待开始" },
+  { id: "cs-4", date: "07/31", day: "今天", time: "14:00", member: "陈思颖", focus: "核心重建", status: "待开始" },
+  { id: "cs-5", date: "07/31", day: "今天", time: "16:00", member: "刘一航", focus: "膝关节活动度", status: "待确认" },
+  { id: "cs-6", date: "08/01", day: "周六", time: "09:00", member: "李明远", focus: "上肢拉力与肩胛控制", status: "已确认" },
+  { id: "cs-7", date: "08/01", day: "周六", time: "14:30", member: "王雨桐", focus: "全身燃脂循环", status: "已确认" },
+  { id: "cs-8", date: "08/02", day: "周日", time: "10:00", member: "张小北", focus: "动作评估与计划复盘", status: "待确认" },
+  { id: "cs-9", date: "08/03", day: "周一", time: "18:30", member: "陈思颖", focus: "核心稳定进阶", status: "已确认" },
+  { id: "cs-10", date: "08/06", day: "周四", time: "19:00", member: "刘一航", focus: "下肢活动度与稳定", status: "已确认" },
+  { id: "cs-11", date: "08/12", day: "周三", time: "18:00", member: "李明远", focus: "阶段体测与负荷调整", status: "已确认" },
+  { id: "cs-12", date: "08/20", day: "周四", time: "19:30", member: "王雨桐", focus: "月度复盘与计划迭代", status: "待确认" },
 ];
 
 export function CoachWorkspace({
@@ -120,7 +127,7 @@ export function CoachWorkspace({
               <h1>{sectionLabels[section]}</h1>
               <p>{section === "members" ? "先进入会员档案，再围绕同一位会员安排训练、饮食和身体反馈。" : `当前正在为 ${selectedMember.name} 处理专属服务。`}</p>
             </div>
-            <span className="auto-sync-note"><Check size={16} /> 页面与 Hermes 修改会自动同步</span>
+            <span className="auto-sync-note"><Check size={16} /> 页面与 AI 修改会自动同步</span>
           </section>
           {section !== "members" ? (
             <MemberContextBar member={selectedMember} members={members} onSelectMember={onSelectMember} goTo={goTo} />
@@ -147,8 +154,13 @@ function CoachOverview({
   onSelectMember: (memberId: string) => void;
   members: CoachMember[];
 }) {
-  const { state, notify } = usePortal();
+  const { state } = usePortal();
   const pending = state.suggestions.filter((item) => item.status === "待确认").length;
+  const [scheduleRange, setScheduleRange] = useState<"day" | "week" | "month">("day");
+  const [selectedSession, setSelectedSession] = useState<(typeof coachSchedule)[number] | null>(null);
+  const [recapOpen, setRecapOpen] = useState(false);
+  const visibleSchedule = coachSchedule.slice(0, scheduleRange === "day" ? 5 : scheduleRange === "week" ? 9 : 12);
+  const rangeTitle = scheduleRange === "day" ? "今日私教安排" : scheduleRange === "week" ? "本周私教安排" : "本月私教安排";
   return (
     <>
       <section className="coach-hero-row">
@@ -158,7 +170,7 @@ function CoachOverview({
           <p>先处理今天的私教课，再跟进需要调整方案的会员。</p>
         </div>
         <div className="inline-actions">
-          <button className="button button-secondary" onClick={openAssistant}><Sparkles size={17} /> Hermes 工作台</button>
+          <button className="button button-secondary" onClick={openAssistant}><Sparkles size={17} /> AI 工作台</button>
           <button className="button button-primary" onClick={() => goTo("coach-members", "/coach/members", "会员管理")}><UserRoundPlus size={17} /> 管理会员</button>
         </div>
       </section>
@@ -166,29 +178,27 @@ function CoachOverview({
         <StatCard icon={CalendarDays} label="今日一对一私教" value="5" suffix="节" note="首节 08:00" onClick={() => goTo("coach-schedule", "/coach/schedule", "课程排期")} />
         <StatCard icon={UsersRound} label="活跃会员" value="28" suffix="人" note="3 人需要跟进" onClick={() => goTo("coach-members", "/coach/members", "会员管理")} />
         <StatCard icon={AlertTriangle} label="身体风险提醒" value="3" suffix="项" note="1 项需今日处理" accent="amber" onClick={() => goTo("coach-body", "/coach/body", "身体反馈")} />
-        <StatCard icon={Sparkles} label="Hermes 待确认" value={pending} suffix="条" note="确认后创建企微任务" accent="slate" onClick={openAssistant} />
+        <StatCard icon={Sparkles} label="AI 待确认" value={pending} suffix="条" note="确认后创建企微任务" accent="slate" onClick={openAssistant} />
       </div>
       <div className="coach-overview-grid">
         <Card className="coach-today-card span-2">
-          <SectionTitle title="今日私教安排" action={<button className="text-button" onClick={() => goTo("coach-schedule", "/coach/schedule", "课程排期")}>完整排期 <ArrowRight size={15} /></button>} />
-          <div className="coach-timeline">
-            {coachSchedule.map((item, index) => {
+          <SectionTitle title={rangeTitle} action={<div className="schedule-range-switch" aria-label="排期范围">{(["day", "week", "month"] as const).map((range) => <button key={range} className={scheduleRange === range ? "active" : ""} onClick={() => setScheduleRange(range)}>{range === "day" ? "日" : range === "week" ? "周" : "月"}</button>)}</div>} />
+          <div className={`coach-timeline coach-timeline-${scheduleRange}`}>
+            {visibleSchedule.map((item, index) => {
               const member = members[index % members.length];
               return (
-              <button key={item.time} onClick={() => {
-                if (member) onSelectMember(member.id);
-                goTo("coach-training", "/coach/training", "训练方案");
-              }}>
-                <time>{item.time}</time>
+              <button key={item.id} onClick={() => setSelectedSession({ ...item, member: member?.name ?? item.member })}>
+                <time><small>{item.day}</small>{item.time}</time>
                 <i className={index === 0 ? "done" : index === 1 ? "active" : ""} />
                 <Avatar name={member?.name ?? item.member} size="sm" />
-                <span><b>{member?.name ?? item.member}</b><small>{item.focus}</small></span>
+                <span><b>{member?.name ?? item.member}</b><small>{item.date} · {item.focus}</small></span>
                 <em>{item.status}</em>
                 <ChevronRight size={16} />
               </button>
               );
             })}
           </div>
+          <button className="schedule-full-link" onClick={() => goTo("coach-schedule", "/coach/schedule", "课程排期")}>进入完整课程排期 <ArrowRight size={15} /></button>
         </Card>
         <Card>
           <SectionTitle title="今日优先事项" />
@@ -221,9 +231,35 @@ function CoachOverview({
             <QualityRow label="饮食记录完整度" value={76} />
             <QualityRow label="身体数据更新率" value={68} />
           </div>
-          <button className="button button-secondary full" onClick={() => notify("本周复盘报告已生成", "info")}><FileText size={17} /> 生成本周复盘</button>
+          <button className="button button-secondary full" onClick={() => setRecapOpen(true)}><FileText size={17} /> 生成本周复盘</button>
         </Card>
       </div>
+      {selectedSession ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSelectedSession(null)}>
+          <section className="modal session-detail-modal coach-session-modal" role="dialog" aria-modal="true" aria-label="教练课程详情" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="icon-button modal-close" onClick={() => setSelectedSession(null)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">{selectedSession.day} · {selectedSession.date}</span>
+            <h2>{selectedSession.member}的私教课</h2>
+            <p>查看课程重点后，可进入会员训练方案继续准备本次课程。</p>
+            <div className="session-detail-date"><Clock3 size={22} /><span><b>{selectedSession.time}</b><small>预计 60–75 分钟</small></span><em>{selectedSession.status}</em></div>
+            <div className="session-detail-grid"><span><Dumbbell size={18} /><small>课程重点</small><b>{selectedSession.focus}</b></span><span><ClipboardCheck size={18} /><small>课前准备</small><b>复核恢复评分与风险提醒</b></span></div>
+            <div className="session-detail-actions"><button className="button button-secondary" onClick={() => { setSelectedSession(null); goTo("coach-schedule", "/coach/schedule", "课程排期"); }}>管理排期</button><button className="button button-primary" onClick={() => { const member = members.find((item) => item.name === selectedSession.member); if (member) onSelectMember(member.id); setSelectedSession(null); goTo("coach-training", "/coach/training", "训练方案"); }}>打开训练方案</button></div>
+          </section>
+        </div>
+      ) : null}
+      {recapOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setRecapOpen(false)}>
+          <section className="modal weekly-recap-modal" role="dialog" aria-modal="true" aria-label="本周执行复盘" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="icon-button modal-close" onClick={() => setRecapOpen(false)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">7 月 27 日—8 月 2 日</span>
+            <h2>本周教练执行复盘</h2>
+            <p>数据已汇总完成。复盘不会自动发送给会员，可继续交给 AI 生成跟进建议。</p>
+            <div className="recap-metrics"><span><small>已完成课程</small><b>18</b><em>节</em></span><span><small>到课率</small><b>94</b><em>%</em></span><span><small>计划完成率</small><b>82</b><em>%</em></span></div>
+            <div className="recap-sections"><article><b>本周亮点</b><p>会员整体到课稳定；李明远的下肢力量计划完成度最高，动作质量持续改善。</p></article><article className="warning"><b>需要跟进</b><p>3 位会员恢复评分偏低，刘一航膝部不适需要在下次训练前完成风险复核。</p></article><article><b>下周建议</b><p>保持主计划不变，为恢复偏低会员减少 10%–15% 训练负荷，并安排一次动作评估。</p></article></div>
+            <div className="session-detail-actions"><button className="button button-secondary" onClick={() => setRecapOpen(false)}>关闭复盘</button><button className="button button-primary" onClick={() => { setRecapOpen(false); openAssistant(); }}><Sparkles size={17} /> 交给 AI 生成建议</button></div>
+          </section>
+        </div>
+      ) : null}
     </>
   );
 }

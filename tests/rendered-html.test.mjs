@@ -14,7 +14,7 @@ test("builds the member portal without starter artifacts", async () => {
   assert.doesNotMatch(`${page}${portal}${packageJson}`, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
-test("includes coach approval, native Hermes and WeCom AI Bot tooling", async () => {
+test("includes coach approval, native agent and WeCom AI Bot tooling", async () => {
   const [coach, admin, assistant, envExample, tools, contact] = await Promise.all([
     readFile(new URL("../components/coach-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
@@ -25,9 +25,9 @@ test("includes coach approval, native Hermes and WeCom AI Bot tooling", async ()
   ]);
   assert.match(coach, /会员档案/);
   assert.match(coach, /训练方案设计/);
-  assert.match(assistant, /Hermes Agent/);
+  assert.match(assistant, /AI 智能教练/);
   assert.match(envExample, /DEEPSEEK_MODEL=deepseek-v4-flash/);
-  assert.match(admin, /企业微信 AI Bot/);
+  assert.match(admin, /企业微信 AI 助理/);
   assert.match(tools, /get_member_by_id/);
   assert.match(contact, /externalcontact\/add_msg_template/);
   assert.match(contact, /发送任务已创建，请在企业微信客户端确认发送。/);
@@ -54,7 +54,7 @@ test("removes member booking and gives the coach interactive schedule control", 
   assert.match(coach, /coach-body/);
   assert.match(server, /coach_booking_add/);
   assert.match(server, /coach_booking_delete/);
-  assert.match(server, /Hermes 仅供教练与管理员使用/);
+  assert.match(server, /AI 助理仅供教练与管理员使用/);
 });
 
 test("adds interactive charts, distinct admin sections, and Hermes website management tools", async () => {
@@ -72,6 +72,7 @@ test("adds interactive charts, distinct admin sections, and Hermes website manag
   assert.match(portal, /admin-notifications/);
   assert.match(portal, /admin-users/);
   assert.match(portal, /admin-settings/);
+  assert.match(portal, /admin-ai/);
   assert.match(admin, /管理账户/);
   assert.match(admin, /saveManagedUser/);
   assert.doesNotMatch(assistant, /assistant-flow/);
@@ -121,4 +122,23 @@ test("supports safe member self-registration and automatic sign-in", async () =>
   assert.match(portal, /还没有账号？立即注册/);
   assert.match(portal, /注册并进入平台/);
   assert.match(portal, /用户协议/);
+});
+
+test("ships the final responsive member polish and simplified admin navigation", async () => {
+  const [memberViews, portal, admin, css] = await Promise.all([
+    readFile(new URL("../components/member-views.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  for (const className of ["weekly-goals-card", "coach-advice-card", "training-rhythm-card", "hydration-card", "measurement-guide-card"]) {
+    assert.match(memberViews, new RegExp(className));
+    assert.match(css, new RegExp(`\\.${className}`));
+  }
+  const adminNavBlock = portal.slice(portal.indexOf("const adminNav"), portal.indexOf("export function FitnessPortal"));
+  assert.doesNotMatch(adminNavBlock, /教练运营/);
+  assert.match(admin, /admin-settings-layout/);
+  assert.match(admin, /integration-status-grid/);
+  assert.match(css, /@media \(max-width: 720px\)/);
+  assert.match(css, /\.admin-settings-layout \{ grid-template-columns: 1fr; \}/);
 });

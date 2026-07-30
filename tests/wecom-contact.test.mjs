@@ -121,7 +121,7 @@ test("Hermes member tools reject invalid bearer and unauthorized coach userid", 
       }),
       badCoach,
     ),
-    /没有 Hermes 管理工具权限/,
+    /没有 AI 管理工具权限/,
   );
 });
 

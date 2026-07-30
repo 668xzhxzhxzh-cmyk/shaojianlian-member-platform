@@ -14,6 +14,7 @@ export type PortalView =
   | "coach-nutrition"
   | "coach-body"
   | "admin"
+  | "admin-ai"
   | "admin-notifications"
   | "admin-users"
   | "admin-settings";

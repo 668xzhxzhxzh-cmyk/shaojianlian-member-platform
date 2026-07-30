@@ -5,6 +5,7 @@ import {
   Activity,
   ArrowUp,
   Bot,
+  CalendarDays,
   ChevronDown,
   ClipboardCheck,
   Dumbbell,
@@ -17,6 +18,7 @@ import {
   Send,
   ShieldAlert,
   Utensils,
+  X,
 } from "lucide-react";
 import { memberRows } from "@/lib/portal-data";
 import { usePortal } from "./portal-context";
@@ -50,13 +52,16 @@ export function AssistantView({
     name: state.profile.name,
   };
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "你好，邵教练。我是 Hermes。请选择准确的 member_id。除分析数据外，我可以直接增删课程、调整会员档案、训练方案、饮食方案与身体反馈，执行后网站会自动同步。", time: now() },
+    { role: "assistant", content: "你好，邵教练。我是平台 AI 助理。请选择准确的会员名称。除分析数据外，我可以协助增删课程、调整会员档案、训练方案、饮食方案与身体反馈，执行后网站会自动同步。", time: now() },
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [memberOpen, setMemberOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [evidenceTab, setEvidenceTab] = useState<"全部" | "训练" | "身体" | "打卡" | "沟通">("全部");
+  const [saveState, setSaveState] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const suggestion = state.suggestions[0];
 
@@ -107,7 +112,7 @@ export function AssistantView({
         signal: controller.signal,
       });
       if (!response.ok) throw new Error(await response.text());
-      if (!response.body) throw new Error("Hermes 暂时没有返回内容");
+      if (!response.body) throw new Error("AI 暂时没有返回内容");
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let text = "";
@@ -118,11 +123,11 @@ export function AssistantView({
         setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: text } : item));
       }
       await refresh(selectedProfile.id);
-      notify("Hermes 操作已完成，会员页面已自动同步");
+      notify("AI 操作已完成，会员页面已自动同步");
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
-        setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: "Hermes 当前处于演示模式。请在生产服务器启动原生 Hermes API 后即可获得实时个性化回答；其他业务功能不受影响。" } : item));
-        notify("原生 Hermes 暂未连接，已切换演示回复", "warning");
+        setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: "AI 当前处于演示模式。连接生产环境后即可获得实时个性化回答；其他业务功能不受影响。" } : item));
+        notify("AI 服务暂未连接，已切换演示回复", "warning");
       }
     } finally {
       setBusy(false);
@@ -137,12 +142,12 @@ export function AssistantView({
 
   function regenerate() {
     choosePrompt(`重新分析${selectedProfile.name}最近 7 天的训练、恢复和饮食数据，并生成一份更精炼的建议草稿。`);
-    notify("已准备重新生成指令，确认后发送给 Hermes", "info");
+    setSaveState("已准备重新生成，请检查指令后发送");
   }
 
   function confirmAndSend() {
-    updateSuggestion(suggestion.id, "待确认");
-    notify(`草稿已保存。请在企业微信“AI健身助理”中使用 member_id=${selectedProfile.id} 确认发送。`, "info");
+    updateSuggestion(suggestion.id, "待确认", { silent: true });
+    setSaveState("发送任务已创建，请在企业微信客户端确认发送。");
   }
 
   function chooseMember(memberId: string) {
@@ -150,26 +155,26 @@ export function AssistantView({
     onSelectMember?.(memberId);
     setMemberOpen(false);
     const member = memberOptions.find((item) => item.id === memberId);
-    notify(`已按 member_id 切换到 ${member?.name ?? memberId}`);
+    setSaveState(`当前会员已切换为 ${member?.name ?? "所选会员"}`);
   }
 
   return (
     <div className="assistant-page">
       <section className="page-intro assistant-intro">
-        <span className="eyebrow">Hermes Agent · DeepSeek</span>
+        <span className="eyebrow">AI 智能教练 · DeepSeek</span>
         <h1>智能助理工作台</h1>
-        <p>通过精确 member_id 让 Hermes 分析并直接管理课程、档案、训练、饮食和身体反馈。</p>
+        <p>通过精确会员名称选择唯一档案，让 AI 分析并协助管理课程、训练、饮食和身体反馈。</p>
       </section>
 
       <div className="assistant-grid">
         <Card className="chat-panel">
-          <div className="chat-heading"><div><MessageCircleMore size={20} /><b>与 Hermes 对话</b></div><button className={`icon-button ${historyOpen ? "active" : ""}`} onClick={() => setHistoryOpen((open) => !open)} aria-label="历史记录"><History size={18} /></button></div>
+          <div className="chat-heading"><div><MessageCircleMore size={20} /><b>与 AI 对话</b></div><button className={`icon-button ${historyOpen ? "active" : ""}`} onClick={() => setHistoryOpen((open) => !open)} aria-label="历史记录"><History size={18} /></button></div>
           {historyOpen ? <div className="chat-history"><b>最近对话</b><button onClick={() => { setHistoryOpen(false); notify("已打开今天 10:32 的恢复分析"); }}>今天 10:32 · 李明恢复分析</button><button onClick={() => { setHistoryOpen(false); notify("已打开 7 月 27 日的饮食复盘"); }}>7 月 27 日 · 饮食执行复盘</button></div> : null}
           <div className="chat-messages">
             {messages.map((message, index) => (
               <div className={`chat-message ${message.role}`} key={`${message.time}-${index}`}>
                 <Avatar name={message.role === "coach" ? "邵教练" : "H"} size="sm" />
-                <div><span>{message.role === "coach" ? "邵教练" : "Hermes"} <time>{message.time}</time></span><p>{message.content || <i className="typing">正在分析会员数据</i>}</p></div>
+                <div><span>{message.role === "coach" ? "邵教练" : "AI 助理"} <time>{message.time}</time></span><p>{message.content || <i className="typing">正在分析会员数据</i>}</p></div>
               </div>
             ))}
           </div>
@@ -178,8 +183,8 @@ export function AssistantView({
             <div>{quickPrompts.map((prompt) => <button key={prompt} onClick={() => choosePrompt(prompt)}>{prompt}</button>)}</div>
           </div>
           <form className="chat-input" onSubmit={askHermes}>
-            <textarea id="hermes-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入你希望 Hermes 分析的问题或任务…" rows={3} />
-            <button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="发送给 Hermes">{busy ? <RefreshCcw className="spin" size={18} /> : <ArrowUp size={18} />}</button>
+            <textarea id="hermes-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入你希望 AI 分析的问题或任务…" rows={3} />
+            <button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="发送给 AI">{busy ? <RefreshCcw className="spin" size={18} /> : <ArrowUp size={18} />}</button>
           </form>
           <small className="ai-disclaimer">AI 建议仅供教练决策参考，不能替代医疗诊断。</small>
         </Card>
@@ -187,14 +192,14 @@ export function AssistantView({
         <div className="suggestion-column">
           <Card className="member-selector">
             <SectionTitle title="选择会员" />
-            <button onClick={() => setMemberOpen((open) => !open)} aria-expanded={memberOpen}><Avatar name={selectedProfile.name} /><span><b>{selectedProfile.name} <em>VIP</em></b><small>{selectedProfile.id} · {selectedProfile.goal}</small></span><ChevronDown size={18} /></button>
-            {memberOpen ? <div className="member-options">{memberOptions.slice(0, 8).map((member) => <button key={member.id} onClick={() => chooseMember(member.id)}><Avatar name={member.name} size="sm" />{member.name}<small>{member.id} · {member.goal}</small></button>)}</div> : null}
+            <button onClick={() => setMemberOpen((open) => !open)} aria-expanded={memberOpen}><Avatar name={selectedProfile.name} /><span><b>{selectedProfile.name} <em>VIP</em></b><small>{selectedProfile.goal} · 已绑定唯一会员档案</small></span><ChevronDown size={18} /></button>
+            {memberOpen ? <div className="member-options">{memberOptions.slice(0, 8).map((member) => <button key={member.id} onClick={() => chooseMember(member.id)}><Avatar name={member.name} size="sm" />{member.name}<small>{member.goal} · {member.plan}</small></button>)}</div> : null}
             <div><span>本周训练<b>4 / 5 次</b></span><span>恢复评分<b>68 分</b></span><span>最近训练<b>7 月 28 日</b></span></div>
           </Card>
           <Card>
             <div className="suggestion-heading">
               <div><span className="eyebrow">AI 草稿 · 待邵教练确认</span><h2>为{selectedProfile.name}生成的个性化建议</h2></div>
-              <div><button className="button button-secondary button-small" onClick={regenerate}><RefreshCcw size={15} /> 重新生成</button><button className="button button-secondary button-small" onClick={() => updateSuggestion(suggestion.id, "草稿")}><FileText size={15} /> 保存草稿</button></div>
+              <div><button className="button button-secondary button-small" onClick={regenerate}><RefreshCcw size={15} /> 重新生成</button><button className="button button-secondary button-small" onClick={() => { updateSuggestion(suggestion.id, "草稿", { silent: true }); setSaveState("草稿已保存，可继续编辑"); }}><FileText size={15} /> 保存草稿</button></div>
             </div>
             <div className={`recommendation-list ${editing ? "is-editing" : ""}`}>
               <Recommendation icon={Dumbbell} title="训练调整" text="近 7 天肩部疲劳度偏高，建议下调上肢推举动作强度 10–15%，重点进行肩袖稳定与灵活性训练。" source="训练记录 · 身体数据" editing={editing} onEdit={() => setEditing(true)} />
@@ -203,14 +208,15 @@ export function AssistantView({
               <Recommendation icon={ShieldAlert} title="风险提示" text="肩部酸痛持续较多，若出现夜间痛或活动受限，应暂停相关负荷并及时咨询专业医务人员。" source="沟通记录 · 风险规则" editing={editing} onEdit={() => setEditing(true)} />
               <Recommendation icon={ClipboardCheck} title="跟进任务" text="安排一次肩部放松与动作评估；下周训练前复测恢复评分，并根据结果调整计划。" source="沟通记录" editing={editing} onEdit={() => setEditing(true)} />
             </div>
-            <div className="suggestion-actions"><button className="button button-secondary" onClick={() => { setEditing((value) => !value); if (editing) notify("修改已保存到草稿"); }}><Edit3 size={17} /> {editing ? "完成修改" : "修改建议"}</button><button className="button button-primary" onClick={confirmAndSend}><Send size={17} /> 保存并前往企业微信确认</button></div>
+            {saveState ? <div className="inline-save-state"><ClipboardCheck size={16} /> {saveState}</div> : null}
+            <div className="suggestion-actions"><button className="button button-secondary" onClick={() => { setEditing((value) => !value); if (editing) { updateSuggestion(suggestion.id, "草稿", { silent: true }); setSaveState("修改已保存到草稿"); } }}><Edit3 size={17} /> {editing ? "完成修改" : "修改建议"}</button><button className="button button-primary" onClick={confirmAndSend}><Send size={17} /> 创建发送任务</button></div>
           </Card>
         </div>
 
         <div className="evidence-column">
           <Card>
-            <SectionTitle title="会员证据概览" action={<button className="text-button" onClick={() => notify("已汇总训练、身体、打卡和沟通四类证据", "info")}>查看全部</button>} />
-            <div className="evidence-list"><Evidence icon={Dumbbell} label="训练记录" value="本周 4 / 5 次 · 负荷 1,820 kcal" /><Evidence icon={Activity} label="身体数据" value="体重 67.9 kg · 体脂 14.2%" /><Evidence icon={MoonStar} label="打卡记录" value="睡眠 6.2h · 恢复评分 68" /><Evidence icon={MessageCircleMore} label="沟通记录" value="肩部酸痛（训练中出现）" /></div>
+            <SectionTitle title="会员证据概览" action={<button className="text-button" onClick={() => { setEvidenceTab("全部"); setEvidenceOpen(true); }}>查看全部</button>} />
+            <div className="evidence-list"><Evidence icon={Dumbbell} label="训练记录" value="本周 4 / 5 次 · 负荷 1,820 kcal" onClick={() => { setEvidenceTab("训练"); setEvidenceOpen(true); }} /><Evidence icon={Activity} label="身体数据" value="体重 67.9 kg · 体脂 14.2%" onClick={() => { setEvidenceTab("身体"); setEvidenceOpen(true); }} /><Evidence icon={MoonStar} label="打卡记录" value="睡眠 6.2h · 恢复评分 68" onClick={() => { setEvidenceTab("打卡"); setEvidenceOpen(true); }} /><Evidence icon={MessageCircleMore} label="沟通记录" value="肩部酸痛（训练中出现）" onClick={() => { setEvidenceTab("沟通"); setEvidenceOpen(true); }} /></div>
           </Card>
           <Card>
             <SectionTitle title="趋势图表（近 7 天）" />
@@ -219,10 +225,28 @@ export function AssistantView({
             <MiniTrend title="体脂率（%）" data={chartData} dataKey="bodyFat" />
           </Card>
           <Card className="agent-status">
-            <Bot size={24} /><div><b>Hermes 服务正常</b><span>DeepSeek 模型 · 鄂州服务区</span></div><i />
+            <Bot size={24} /><div><b>AI 服务正常</b><span>DeepSeek 模型 · 鄂州服务区</span></div><i />
           </Card>
         </div>
       </div>
+      {evidenceOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setEvidenceOpen(false)}>
+          <section className="modal evidence-detail-modal" role="dialog" aria-modal="true" aria-label="会员证据详情" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="icon-button modal-close" onClick={() => setEvidenceOpen(false)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">AI 分析依据 · {selectedProfile.name}</span>
+            <h2>会员证据中心</h2>
+            <p>所有建议均可回溯到会员档案中的真实记录；系统使用唯一档案标识精确匹配，不根据昵称猜测。</p>
+            <div className="evidence-tabs">{(["全部", "训练", "身体", "打卡", "沟通"] as const).map((tab) => <button key={tab} className={evidenceTab === tab ? "active" : ""} onClick={() => setEvidenceTab(tab)}>{tab}</button>)}</div>
+            <div className="evidence-detail-list">
+              {(evidenceTab === "全部" || evidenceTab === "训练") ? <EvidenceDetail icon={Dumbbell} title="训练执行" metric="4 / 5 次" detail="最近一次为下肢力量与髋稳定，完成度 86%，近七天训练负荷 1,820 kcal。" source="训练记录 · 7 月 29 日更新" /> : null}
+              {(evidenceTab === "全部" || evidenceTab === "身体") ? <EvidenceDetail icon={Activity} title="身体趋势" metric="67.9 kg" detail="近三周体重下降 2.9 kg，体脂率 14.2%，下降节奏稳定。" source="身体数据 · 7 月 29 日更新" /> : null}
+              {(evidenceTab === "全部" || evidenceTab === "打卡") ? <EvidenceDetail icon={CalendarDays} title="恢复与打卡" metric="68 分" detail="近三日平均睡眠 6.2 小时，恢复评分偏低，建议降低上肢推举负荷。" source="每日打卡 · 今天 08:18" /> : null}
+              {(evidenceTab === "全部" || evidenceTab === "沟通") ? <EvidenceDetail icon={MessageCircleMore} title="沟通与风险" metric="需关注" detail="会员反馈肩部在训练中酸痛；若出现夜间痛或活动受限，应暂停相关训练并就医。" source="教练沟通记录 · 昨天 21:06" /> : null}
+            </div>
+            <div className="session-detail-actions"><button className="button button-secondary" onClick={() => setEvidenceOpen(false)}>返回工作台</button><button className="button button-primary" onClick={() => { setEvidenceOpen(false); choosePrompt(`根据${selectedProfile.name}当前训练、身体、打卡与沟通证据，重新生成可执行建议。`); }}>基于证据生成建议</button></div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -231,8 +255,12 @@ function Recommendation({ icon: Icon, title, text, source, editing, onEdit }: { 
   return <article><span><Icon size={22} /></span><div><h3>{title}<em>可编辑</em></h3>{editing ? <textarea aria-label={`编辑${title}`} defaultValue={text} rows={3} /> : <p>{text}</p>}</div><small>数据来源：{source}</small><button className="text-button" onClick={onEdit}><Edit3 size={14} /> 编辑建议</button></article>;
 }
 
-function Evidence({ icon: Icon, label, value }: { icon: typeof Dumbbell; label: string; value: string }) {
-  return <div><Icon size={19} /><span><b>{label}</b><small>{value}</small></span></div>;
+function Evidence({ icon: Icon, label, value, onClick }: { icon: typeof Dumbbell; label: string; value: string; onClick: () => void }) {
+  return <button type="button" onClick={onClick}><Icon size={19} /><span><b>{label}</b><small>{value}</small></span><ChevronDown size={15} /></button>;
+}
+
+function EvidenceDetail({ icon: Icon, title, metric, detail, source }: { icon: typeof Dumbbell; title: string; metric: string; detail: string; source: string }) {
+  return <article><span><Icon size={20} /></span><div><div><b>{title}</b><em>{metric}</em></div><p>{detail}</p><small>{source}</small></div></article>;
 }
 
 function MiniTrend({ title, data, dataKey }: { title: string; data: Record<string, unknown>[]; dataKey: string }) {

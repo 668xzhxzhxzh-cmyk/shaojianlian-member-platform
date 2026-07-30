@@ -74,7 +74,7 @@ const seedState = {
   ],
 };
 
-const hermesPrompt = `你是 Hermes，是邵教练专属会员平台唯一的智能管理智能体。你不仅分析数据，还可以通过已配置的 MCP 网站管理工具修改会员档案、增删私教课程、更新训练方案、饮食方案和身体反馈。所有查询与修改必须使用精确 member_id，禁止按姓名或昵称猜测。执行修改后明确列出已改变的字段；页面会自动同步，无需提示用户点击同步按钮。客户消息仍必须先创建草稿并由教练确认；不要声称已经发送或会员已收到。不做医疗诊断；持续疼痛、夜间痛、眩晕或胸闷应建议暂停训练并咨询合格医务人员。`;
+const hermesPrompt = `你是邵教练专属会员平台唯一的 AI 管理智能体。你不仅分析数据，还可以通过已配置的 MCP 网站管理工具修改会员档案、增删私教课程、更新训练方案、饮食方案和身体反馈。所有查询与修改必须使用精确 member_id，禁止按姓名或昵称猜测。执行修改后明确列出已改变的字段；页面会自动同步，无需提示用户点击同步按钮。客户消息仍必须先创建草稿并由教练确认；不要声称已经发送或会员已收到。不做医疗诊断；持续疼痛、夜间痛、眩晕或胸闷应建议暂停训练并咨询合格医务人员。`;
 
 await initializeDatabase();
 const wecomContact = createWecomContactService({ pool });
@@ -100,7 +100,7 @@ const server = createServer(async (request, response) => {
       return wecomContact.handleInternalTool(request, response).catch((error) => {
         const status = Number(error?.statusCode || 500);
         return json(response, status, {
-          error: status < 500 ? error.message : "Hermes 会员工具暂时不可用",
+          error: status < 500 ? error.message : "AI 会员工具暂时不可用",
         });
       });
     }
@@ -438,7 +438,7 @@ async function handleAction(request, response, session) {
 async function handleHermes(request, response, session) {
   if (!["coach", "admin"].includes(session.role)) {
     await audit(session.id, "hermes_chat_denied", { role: session.role });
-    return json(response, 403, { error: "Hermes 仅供教练与管理员使用" });
+    return json(response, 403, { error: "AI 助理仅供教练与管理员使用" });
   }
   const body = await readJson(request);
   const memberId = String(body.member_id || "").trim();
@@ -447,17 +447,17 @@ async function handleHermes(request, response, session) {
   if (!memberState) return json(response, 404, { error: "找不到该 member_id 对应的会员" });
   const messages = Array.isArray(body.messages) ? body.messages.slice(-20).filter((item) => ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.length <= 4000) : [];
   if (!messages.length) return json(response, 400, { error: "请输入问题" });
-  if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) return json(response, 503, { error: "原生 Hermes API 尚未配置" });
+  if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) return json(response, 503, { error: "AI 服务尚未配置" });
 
   let hermesApi;
   try {
     hermesApi = new URL(process.env.HERMES_API_URL);
   } catch {
-    return json(response, 500, { error: "Hermes API 地址无效" });
+    return json(response, 500, { error: "AI 服务地址无效" });
   }
   const allowedHosts = new Set(["127.0.0.1", "localhost", "host.docker.internal"]);
   if (!["http:", "https:"].includes(hermesApi.protocol) || !allowedHosts.has(hermesApi.hostname)) {
-    return json(response, 500, { error: "Hermes API 必须使用服务器私有回环地址" });
+    return json(response, 500, { error: "AI 服务必须使用服务器私有回环地址" });
   }
 
   const upstream = await fetch(new URL("/v1/chat/completions", hermesApi), {
@@ -476,7 +476,7 @@ async function handleHermes(request, response, session) {
   });
   if (!upstream.ok || !upstream.body) {
     console.error(JSON.stringify({ level: "error", integration: "hermes", status: upstream.status }));
-    return json(response, 502, { error: "Hermes 智能体暂时不可用" });
+    return json(response, 502, { error: "AI 智能体暂时不可用" });
   }
   response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store, no-transform", "x-accel-buffering": "no" });
   const reader = upstream.body.getReader();

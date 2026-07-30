@@ -34,7 +34,7 @@ type PortalContextValue = {
   saveNutritionPlan: (plan: NutritionPlan) => void;
   saveBodyFeedback: (feedback: Omit<BodyFeedback, "id" | "date">) => void;
   updateMemberProfile: (profile: Partial<PortalState["profile"]>) => void;
-  updateSuggestion: (id: string, status: "已发送" | "待确认" | "草稿") => void;
+  updateSuggestion: (id: string, status: "已发送" | "待确认" | "草稿", options?: { silent?: boolean }) => void;
 };
 
 const PortalContext = createContext<PortalContextValue | null>(null);
@@ -80,10 +80,10 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
   const notify = useCallback(
     (message: string, tone: Toast["tone"] = "success") => {
       const id = Date.now();
-      setToasts((items) => [...items, { id, message, tone }]);
+      setToasts([{ id, message, tone }]);
       window.setTimeout(() => {
         setToasts((items) => items.filter((item) => item.id !== id));
-      }, 3200);
+      }, 2400);
     },
     [],
   );
@@ -221,7 +221,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateSuggestion = useCallback(
-    (id: string, status: "已发送" | "待确认" | "草稿") => {
+    (id: string, status: "已发送" | "待确认" | "草稿", options?: { silent?: boolean }) => {
       setState((current) => ({
         ...current,
         suggestions: current.suggestions.map((suggestion) =>
@@ -229,7 +229,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         ),
       }));
       void persist("suggestion", { id, status });
-      notify(status === "已发送" ? "建议已交给 Hermes 推送" : "建议状态已保存");
+      if (!options?.silent) notify(status === "已发送" ? "发送任务已创建，请在企业微信客户端确认发送。" : "建议状态已更新");
     },
     [notify],
   );
