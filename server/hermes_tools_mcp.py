@@ -38,19 +38,31 @@ ALLOWED_COACHES = {
 mcp = FastMCP(
     "shao-coach-member-tools",
     instructions=(
-        "仅供企业微信中已授权教练使用。所有会员操作必须提供精确 member_id；"
+        "仅供企业微信中服务器白名单已授权的唯一教练使用。教练 userid 由服务器注入，"
+        "工具参数和聊天正文都不能指定或替换身份。所有会员操作必须提供精确 member_id；"
         "禁止根据姓名、昵称或头像猜测会员。创建发送草稿后必须等待教练明确确认，"
         "并且不得把任务创建或企业微信报告已发送表述为会员已收到。"
     ),
 )
 
 
-def _call(operation: str, coach_userid: str, **payload: Any) -> dict[str, Any]:
-    coach_userid = str(coach_userid or "").strip()
+def _verified_coach_userid() -> str:
+    """Return the single server-configured coach identity.
+
+    The WeCom adapter rejects non-allowlisted senders before Hermes runs. The
+    MCP process independently binds every operation to the same server-side
+    allowlist, so a model or chat message can never choose another coach.
+    """
+
+    if len(ALLOWED_COACHES) != 1:
+        raise RuntimeError("必须在服务器端配置且仅配置一个授权教练 userid")
+    return next(iter(ALLOWED_COACHES))
+
+
+def _call(operation: str, **payload: Any) -> dict[str, Any]:
+    coach_userid = _verified_coach_userid()
     if not TOOL_TOKEN:
         raise RuntimeError("Hermes 管理工具令牌未配置")
-    if not coach_userid or coach_userid not in ALLOWED_COACHES:
-        raise PermissionError("该企业微信 userid 没有管理工具权限")
     body = json.dumps(
         {"operation": operation, "coach_userid": coach_userid, **payload},
         ensure_ascii=False,
@@ -80,34 +92,32 @@ def _call(operation: str, coach_userid: str, **payload: Any) -> dict[str, Any]:
 
 
 @mcp.tool()
-def get_member_by_id(member_id: str, coach_userid: str) -> dict[str, Any]:
+def get_member_by_id(member_id: str) -> dict[str, Any]:
     """按精确 member_id 查询已绑定给当前教练的会员数据。
 
-    绝对不要传姓名或微信昵称；coach_userid 必须来自当前企业微信消息的真实发送者。
+    绝对不要传姓名或微信昵称。教练 userid 已由服务器安全绑定，不得询问用户。
     """
 
     return _call(
         "get_member_by_id",
-        coach_userid,
         member_id=member_id,
     )
 
 
 @mcp.tool()
-def list_customer_ids(coach_userid: str) -> dict[str, Any]:
+def list_customer_ids() -> dict[str, Any]:
     """列出当前教练在企业微信客户联系中的 external_userid。
 
     结果只用于与明确的 member_id 建立绑定，不得根据昵称自动匹配。
     """
 
-    return _call("list_customer_ids", coach_userid)
+    return _call("list_customer_ids")
 
 
 @mcp.tool()
 def bind_member_external_userid(
     member_id: str,
     external_userid: str,
-    coach_userid: str,
 ) -> dict[str, Any]:
     """绑定精确 member_id、external_userid 和当前教练 userid。
 
@@ -116,7 +126,6 @@ def bind_member_external_userid(
 
     return _call(
         "bind_member_external_userid",
-        coach_userid,
         member_id=member_id,
         external_userid=external_userid,
     )
@@ -125,7 +134,6 @@ def bind_member_external_userid(
 @mcp.tool()
 def create_member_message_draft(
     member_id: str,
-    coach_userid: str,
     title: str,
     content: str,
 ) -> dict[str, Any]:
@@ -136,7 +144,6 @@ def create_member_message_draft(
 
     return _call(
         "create_message_draft",
-        coach_userid,
         member_id=member_id,
         title=title,
         content=content,
@@ -146,7 +153,6 @@ def create_member_message_draft(
 @mcp.tool()
 def confirm_customer_send_task(
     task_id: str,
-    coach_userid: str,
     confirmation: str,
 ) -> dict[str, Any]:
     """在教练明确回复“确认发送”后创建企业微信客户发送任务。
@@ -157,7 +163,6 @@ def confirm_customer_send_task(
 
     return _call(
         "confirm_customer_send_task",
-        coach_userid,
         task_id=task_id,
         confirmation=confirmation,
     )
@@ -166,7 +171,6 @@ def confirm_customer_send_task(
 @mcp.tool()
 def get_customer_send_task_status(
     task_id: str,
-    coach_userid: str,
 ) -> dict[str, Any]:
     """查询客户发送任务状态。
 
@@ -175,7 +179,6 @@ def get_customer_send_task_status(
 
     return _call(
         "get_send_task_status",
-        coach_userid,
         task_id=task_id,
     )
 
