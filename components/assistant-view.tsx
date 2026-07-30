@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowUp,
@@ -19,6 +19,7 @@ import {
   ShieldAlert,
   Utensils,
 } from "lucide-react";
+import { memberRows } from "@/lib/portal-data";
 import { usePortal } from "./portal-context";
 import { Avatar, Card, SectionTitle, TrendChart } from "./ui";
 
@@ -33,19 +34,49 @@ const quickPrompts = [
   "安排睡眠恢复提醒",
 ];
 
-export function AssistantView() {
+export function AssistantView({
+  selectedMemberId,
+  onSelectMember,
+}: {
+  selectedMemberId?: string;
+  onSelectMember?: (memberId: string) => void;
+}) {
   const { state, notify, updateSuggestion } = usePortal();
+  const [localMemberId, setLocalMemberId] = useState(selectedMemberId ?? state.profile.id);
+  const [memberOptions, setMemberOptions] = useState(memberRows);
+  const activeMemberId = selectedMemberId ?? localMemberId;
+  const selectedProfile = memberOptions.find((member) => member.id === activeMemberId) ?? {
+    ...memberRows[0],
+    id: state.profile.id,
+    name: state.profile.name,
+  };
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: `你好，${state.profile.name}。我是 Hermes，可以结合你的训练、饮食、睡眠和身体记录提供个性化建议。你可以先告诉我当前训练目标。`, time: now() },
+    { role: "assistant", content: "你好，邵教练。我是 Hermes。请选择会员并用 member_id 发起分析，我会结合该会员的训练、饮食、恢复和身体记录整理建议草稿。", time: now() },
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [memberOpen, setMemberOpen] = useState(false);
-  const [selectedMember, setSelectedMember] = useState(state.profile.name);
   const [editing, setEditing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const suggestion = state.suggestions[0];
+
+  useEffect(() => {
+    fetch("/api/users", { credentials: "include" })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const result = await response.json() as { users?: Array<{ id: string; name: string; phone: string; role: string; status: string }> };
+        const members = result.users?.filter((user) => Boolean(user.id) && user.role === "member" && user.status === "active") ?? [];
+        if (!members.length) return;
+        setMemberOptions(members.map((member, index) => ({
+          ...memberRows[index % memberRows.length],
+          id: member.id,
+          name: member.name,
+          phone: member.phone,
+        })));
+      })
+      .catch(() => undefined);
+  }, []);
 
   const chartData = useMemo(
     () => state.bodyMetrics.slice(-7).map((item, index) => ({ ...item, load: [1820, 1940, 1600, 2250, 1760, 2140, 1680][index] })),
@@ -68,9 +99,7 @@ export function AssistantView() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          member: state.profile,
-          bodyMetrics: state.bodyMetrics.slice(-7),
-          meals: state.meals,
+          member_id: selectedProfile.id,
           messages: nextMessages.map((item) => ({
             role: item.role === "coach" ? "user" : "assistant",
             content: item.content,
@@ -106,13 +135,21 @@ export function AssistantView() {
   }
 
   function regenerate() {
-    choosePrompt(`重新分析${selectedMember}最近 7 天的训练、恢复和饮食数据，并生成一份更精炼的建议草稿。`);
+    choosePrompt(`重新分析${selectedProfile.name}最近 7 天的训练、恢复和饮食数据，并生成一份更精炼的建议草稿。`);
     notify("已准备重新生成指令，确认后发送给 Hermes", "info");
   }
 
   function confirmAndSend() {
     updateSuggestion(suggestion.id, "待确认");
-    notify(`草稿已保存。请在企业微信“AI健身助理”中使用 member_id=${state.profile.id} 确认发送。`, "info");
+    notify(`草稿已保存。请在企业微信“AI健身助理”中使用 member_id=${selectedProfile.id} 确认发送。`, "info");
+  }
+
+  function chooseMember(memberId: string) {
+    setLocalMemberId(memberId);
+    onSelectMember?.(memberId);
+    setMemberOpen(false);
+    const member = memberOptions.find((item) => item.id === memberId);
+    notify(`已按 member_id 切换到 ${member?.name ?? memberId}`);
   }
 
   return (
@@ -156,13 +193,13 @@ export function AssistantView() {
         <div className="suggestion-column">
           <Card className="member-selector">
             <SectionTitle title="选择会员" />
-            <button onClick={() => setMemberOpen((open) => !open)} aria-expanded={memberOpen}><Avatar name={selectedMember} /><span><b>{selectedMember} <em>VIP</em></b><small>28 岁 · 178cm / 72kg</small></span><ChevronDown size={18} /></button>
-            {memberOpen ? <div className="member-options">{["李明", "王芳", "张伟"].map((member) => <button key={member} onClick={() => { setSelectedMember(member); setMemberOpen(false); notify(`已切换到会员 ${member}`); }}><Avatar name={member} size="sm" />{member}<small>{member === "李明" ? "减脂专项" : member === "王芳" ? "体态改善" : "增肌专项"}</small></button>)}</div> : null}
+            <button onClick={() => setMemberOpen((open) => !open)} aria-expanded={memberOpen}><Avatar name={selectedProfile.name} /><span><b>{selectedProfile.name} <em>VIP</em></b><small>{selectedProfile.id} · {selectedProfile.goal}</small></span><ChevronDown size={18} /></button>
+            {memberOpen ? <div className="member-options">{memberOptions.slice(0, 8).map((member) => <button key={member.id} onClick={() => chooseMember(member.id)}><Avatar name={member.name} size="sm" />{member.name}<small>{member.id} · {member.goal}</small></button>)}</div> : null}
             <div><span>本周训练<b>4 / 5 次</b></span><span>恢复评分<b>68 分</b></span><span>最近训练<b>7 月 28 日</b></span></div>
           </Card>
           <Card>
             <div className="suggestion-heading">
-              <div><span className="eyebrow">AI 草稿 · 待邵教练确认</span><h2>为{selectedMember}生成的个性化建议</h2></div>
+              <div><span className="eyebrow">AI 草稿 · 待邵教练确认</span><h2>为{selectedProfile.name}生成的个性化建议</h2></div>
               <div><button className="button button-secondary button-small" onClick={regenerate}><RefreshCcw size={15} /> 重新生成</button><button className="button button-secondary button-small" onClick={() => updateSuggestion(suggestion.id, "草稿")}><FileText size={15} /> 保存草稿</button></div>
             </div>
             <div className={`recommendation-list ${editing ? "is-editing" : ""}`}>

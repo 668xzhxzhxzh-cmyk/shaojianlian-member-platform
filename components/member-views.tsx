@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   Activity,
   Apple,
@@ -8,6 +8,8 @@ import {
   BadgeCheck,
   CalendarCheck,
   Check,
+  ChevronLeft,
+  ChevronRight,
   CircleDot,
   Clock3,
   Droplets,
@@ -19,14 +21,12 @@ import {
   MoonStar,
   Plus,
   Scale,
-  Sparkles,
   Target,
   TimerReset,
   TrendingDown,
   Trophy,
   UserRoundCheck,
   Utensils,
-  X,
 } from "lucide-react";
 import { trainingExercises } from "@/lib/portal-data";
 import { usePortal } from "./portal-context";
@@ -56,10 +56,10 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
       </section>
 
       <div className="stats-grid four">
-        <StatCard icon={Dumbbell} label="本周训练次数" value={onboarding ? "0" : "4"} suffix={onboarding ? "次" : "/ 5 次"} note={onboarding ? "等待教练制定计划" : "完成 80%"} />
-        <StatCard icon={Flame} label="本周消耗（预估）" value={onboarding ? "0" : "6,240"} suffix="kcal" note={onboarding ? "训练后自动累计" : "较上周 ↑12%"} accent="amber" />
-        <StatCard icon={Target} label="连续打卡" value={state.streak} suffix="天" note="连续保持中" />
-        <StatCard icon={HeartPulse} label="综合评分" value={onboarding ? "—" : "92"} suffix={onboarding ? "" : "分"} note={onboarding ? "完成建档后生成" : "优秀"} accent="slate" />
+        <StatCard icon={Dumbbell} label="本周训练次数" value={onboarding ? "0" : "4"} suffix={onboarding ? "次" : "/ 5 次"} note={onboarding ? "等待教练制定计划" : "点击查看训练计划"} onClick={() => goTo("training")} />
+        <StatCard icon={Flame} label="本周消耗（预估）" value={onboarding ? "0" : "6,240"} suffix="kcal" note={onboarding ? "训练后自动累计" : "点击查看饮食执行"} accent="amber" onClick={() => goTo("nutrition")} />
+        <StatCard icon={Target} label="连续打卡" value={state.streak} suffix="天" note="点击查看打卡记录" onClick={() => goTo("checkins")} />
+        <StatCard icon={HeartPulse} label="综合评分" value={onboarding ? "—" : "92"} suffix={onboarding ? "" : "分"} note={onboarding ? "完成建档后生成" : "点击查看身体趋势"} accent="slate" onClick={() => goTo("body")} />
       </div>
 
       <div className="dashboard-main-grid">
@@ -74,7 +74,7 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
               >
                 <span>{booking.day}</span>
                 <b>{booking.date}</b>
-                <strong>{booking.title}</strong>
+                <strong>一对一私教</strong>
                 <small>{booking.time}</small>
                 <em className={`status status-${booking.status}`}>{booking.status}</em>
                 {index === 2 ? <span className="today-dot" /> : null}
@@ -113,8 +113,8 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
               <span>— 邵教练{onboarding ? "" : " · 今天 09:30"}</span>
             </div>
           </div>
-          <button className="button button-secondary full" onClick={() => goTo("assistant")}>
-            <Sparkles size={17} /> 问问 Hermes 智能助理
+          <button className="button button-secondary full" onClick={() => goTo("body")}>
+            <Activity size={17} /> 查看本周身体反馈
           </button>
         </Card>
       </div>
@@ -249,8 +249,8 @@ function Timeline({ time, title, detail, done, active }: { time: string; title: 
 
 export function NutritionView() {
   const { state, addWater, toggleMeal, notify } = usePortal();
-  const [goalOpen, setGoalOpen] = useState(false);
   const [calorieGoal, setCalorieGoal] = useState(1800);
+  const goalRef = useRef<HTMLElement | null>(null);
   const calories = state.meals.filter((meal) => meal.completed).reduce((sum, meal) => sum + meal.calories, 0);
 
   function saveGoal(event: FormEvent<HTMLFormElement>) {
@@ -258,8 +258,12 @@ export function NutritionView() {
     const data = new FormData(event.currentTarget);
     const nextGoal = Math.min(5000, Math.max(1000, Number(data.get("calorieGoal")) || 1800));
     setCalorieGoal(nextGoal);
-    setGoalOpen(false);
     notify(`营养目标已更新为 ${nextGoal} 千卡`);
+  }
+
+  function revealGoalEditor() {
+    goalRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => goalRef.current?.querySelector<HTMLInputElement>("input")?.focus(), 450);
   }
 
   return (
@@ -267,7 +271,7 @@ export function NutritionView() {
       <PageIntro eyebrow="饮食管理" title="吃得科学，也吃得从容" text="每一餐都为今天的训练和明天的恢复服务。" />
       <div className="nutrition-hero-grid">
         <Card className="span-2">
-          <SectionTitle title="今日营养进度" action={<button className="button button-secondary button-small" onClick={() => setGoalOpen(true)}>调整目标</button>} />
+          <SectionTitle title="今日营养进度" action={<button className="button button-secondary button-small" onClick={revealGoalEditor}>调整目标</button>} />
           <div className="nutrition-progress">
             <Ring value={(calories / calorieGoal) * 100} label={`${calories}`} sublabel={`/ ${calorieGoal} kcal`} />
             <div className="macro-list large">
@@ -316,16 +320,17 @@ export function NutritionView() {
           <Card className="warning-card"><HeartPulse size={22} /><div><b>今日需要注意</b><p>蛋白质略高于目标，晚餐减少额外蛋白粉；饮水量仍差 700 ml。</p></div></Card>
         </div>
       </div>
-      {goalOpen ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setGoalOpen(false)}>
-          <form className="modal modal-compact" onSubmit={saveGoal} onMouseDown={(event) => event.stopPropagation()}>
-            <button type="button" className="icon-button modal-close" onClick={() => setGoalOpen(false)} aria-label="关闭"><X size={20} /></button>
-            <span className="eyebrow">营养目标</span><h2>调整每日摄入目标</h2><p>目标会立即用于今日进度计算，正式方案仍建议由教练确认。</p>
-            <label className="stacked-label">每日热量（千卡）<input name="calorieGoal" type="number" min="1000" max="5000" step="50" defaultValue={calorieGoal} required /></label>
-            <button className="button button-primary full" type="submit">保存目标</button>
-          </form>
+      <section className="card inline-editor nutrition-goal-editor" ref={goalRef} id="nutrition-goal">
+        <div>
+          <span className="eyebrow">营养目标</span>
+          <h2>调整每日摄入目标</h2>
+          <p>用于计算当天进度。邵教练会结合训练量、恢复和身体变化复核正式方案。</p>
         </div>
-      ) : null}
+        <form onSubmit={saveGoal}>
+          <label>每日热量（千卡）<input name="calorieGoal" type="number" min="1000" max="5000" step="50" defaultValue={calorieGoal} required /></label>
+          <button className="button button-primary" type="submit">保存目标</button>
+        </form>
+      </section>
     </div>
   );
 }
@@ -375,8 +380,8 @@ export function CheckinsView() {
 
 export function BodyView() {
   const { state, saveBodyMetric } = usePortal();
-  const [open, setOpen] = useState(false);
   const [metric, setMetric] = useState<"weight" | "bodyFat" | "muscle">("weight");
+  const recordRef = useRef<HTMLElement | null>(null);
   const latest = state.bodyMetrics.at(-1);
   const previous = state.bodyMetrics.at(-2);
   const metricLabels = { weight: "体重", bodyFat: "体脂率", muscle: "肌肉量" };
@@ -391,14 +396,20 @@ export function BodyView() {
       muscle: Number(data.get("muscle")),
       waist: Number(data.get("waist")),
     });
-    setOpen(false);
+    event.currentTarget.reset();
+    recordRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function revealRecordForm() {
+    recordRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => recordRef.current?.querySelector<HTMLInputElement>("input")?.focus(), 450);
   }
 
   return (
     <div className="view-stack">
       <div className="page-intro-row">
         <PageIntro eyebrow="身体数据" title="用趋势看进步，不被单日数字左右" text="建议每周固定时间、相同状态测量一次。" />
-        <button className="button button-primary" onClick={() => setOpen(true)}><Plus size={18} /> 记录身体数据</button>
+        <button className="button button-primary" onClick={revealRecordForm}><Plus size={18} /> 记录身体数据</button>
       </div>
       <div className="stats-grid four">
         <StatCard icon={Scale} label="当前体重" value={latest?.weight ?? "—"} suffix={latest ? "kg" : ""} note={latest && previous ? `较上次 ${(latest.weight - previous.weight).toFixed(1)} kg` : "等待首次记录"} />
@@ -417,21 +428,22 @@ export function BodyView() {
         <Card><SectionTitle title="本月变化" /><div className="delta-grid"><div><b>{latest ? "-1.9" : "—"}</b><span>kg 体重</span></div><div><b>{latest ? "-0.7" : "—"}</b><span>% 体脂</span></div><div><b>{latest ? "+0.8" : "—"}</b><span>kg 肌肉</span></div></div></Card>
         <Card><SectionTitle title="测量提示" /><p className="body-copy">起床排空后、早餐前测量；穿着保持一致。短期波动多来自水分，关注 2–4 周趋势。</p></Card>
       </div>
-      {open ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setOpen(false)}>
-          <form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
-            <button type="button" className="icon-button modal-close" onClick={() => setOpen(false)} aria-label="关闭"><X size={20} /></button>
-            <span className="eyebrow">数据记录</span><h2>记录今天的身体状态</h2><p>保留一位小数，测量单位已固定。</p>
-            <div className="form-grid">
-              <label>体重（kg）<input name="weight" type="number" step="0.1" min="20" max="350" defaultValue={latest?.weight} required /></label>
-              <label>体脂率（%）<input name="bodyFat" type="number" step="0.1" min="1" max="70" defaultValue={latest?.bodyFat} required /></label>
-              <label>肌肉量（kg）<input name="muscle" type="number" step="0.1" min="5" max="150" defaultValue={latest?.muscle} required /></label>
-              <label>腰围（cm）<input name="waist" type="number" step="0.1" min="30" max="250" defaultValue={latest?.waist} required /></label>
-            </div>
-            <button className="button button-primary full" type="submit">保存记录</button>
-          </form>
+      <section className="card inline-editor body-record-editor" ref={recordRef} id="body-record">
+        <div>
+          <span className="eyebrow">数据记录</span>
+          <h2>记录今天的身体状态</h2>
+          <p>统一在起床排空后测量，保留一位小数，便于形成可信趋势。</p>
         </div>
-      ) : null}
+        <form onSubmit={submit}>
+          <div className="form-grid">
+            <label>体重（kg）<input name="weight" type="number" step="0.1" min="20" max="350" defaultValue={latest?.weight} required /></label>
+            <label>体脂率（%）<input name="bodyFat" type="number" step="0.1" min="1" max="70" defaultValue={latest?.bodyFat} required /></label>
+            <label>肌肉量（kg）<input name="muscle" type="number" step="0.1" min="5" max="150" defaultValue={latest?.muscle} required /></label>
+            <label>腰围（cm）<input name="waist" type="number" step="0.1" min="30" max="250" defaultValue={latest?.waist} required /></label>
+          </div>
+          <button className="button button-primary" type="submit">保存本次记录</button>
+        </form>
+      </section>
     </div>
   );
 }
@@ -439,55 +451,114 @@ export function BodyView() {
 export function BookingView() {
   const { state, updateBooking, notify } = usePortal();
   const [mode, setMode] = useState<"week" | "month">("week");
-  const [courseType, setCourseType] = useState("全部课程类型");
-  const visibleBookings = state.bookings.filter((booking) => courseType === "全部课程类型" || (courseType === "私教课" ? booking.title.includes("私教") || booking.title.includes("力量") : !booking.title.includes("私教")));
+  const [activeDay, setActiveDay] = useState(2);
+  const hours = Array.from({ length: 13 }, (_, index) => `${String(index + 8).padStart(2, "0")}:00`);
+  const monthCounts: Record<string, number> = {
+    "7/1": 2, "7/3": 3, "7/5": 1, "7/7": 2, "7/9": 4, "7/10": 2,
+    "7/12": 2, "7/14": 3, "7/16": 2, "7/18": 4, "7/20": 1, "7/22": 3,
+    "7/24": 2, "7/25": 1, "7/27": 2, "7/28": 3, "7/29": 2, "7/30": 2,
+    "7/31": 3, "8/1": 2, "8/2": 1,
+  };
+  const monthCells = Array.from({ length: 35 }, (_, index) => {
+    if (index < 2) return null;
+    const sequence = index - 1;
+    return sequence <= 31 ? { key: `7/${sequence}`, day: sequence, nextMonth: false } : { key: `8/${sequence - 31}`, day: sequence - 31, nextMonth: true };
+  });
 
   function reserveNext() {
-    const available = visibleBookings.find((booking) => booking.status === "可预约");
-    if (!available) return notify("当前筛选下没有可预约课程", "info");
+    const available = state.bookings.find((booking) => booking.status === "可预约");
+    if (!available) return notify("本周没有可预约的私教时段", "info");
+    setActiveDay(state.bookings.findIndex((booking) => booking.id === available.id));
+    setMode("week");
     updateBooking(available.id);
+  }
+
+  function handleSession(booking: (typeof state.bookings)[number]) {
+    if (booking.status === "可预约" || booking.status === "已预约") {
+      updateBooking(booking.id);
+      return;
+    }
+    notify(`${booking.date} ${booking.time} · ${booking.status}`, "info");
   }
 
   return (
     <div className="view-stack">
-      <PageIntro eyebrow="课程预约" title="课程预约与上课课表" text="查看本周安排与教练空闲时段，合理安排训练节奏。" />
+      <div className="page-intro-row">
+        <PageIntro eyebrow="一对一私教预约" title="选择适合你的训练时间" text="完整查看邵教练可约时段；所有课程均为一对一私教，不设团体课。" />
+        <button className="button button-primary" onClick={reserveNext}><Plus size={17} /> 预约最近时段</button>
+      </div>
       <div className="booking-layout">
-        <Card className="span-3">
-          <div className="booking-toolbar">
+        <Card className="span-3 booking-calendar-card">
+          <div className="booking-toolbar booking-toolbar-new">
             <div className="segmented"><button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}>周视图</button><button className={mode === "month" ? "active" : ""} onClick={() => setMode("month")}>月视图</button></div>
-            <strong>2026 年 7 月 27 日 — 8 月 2 日</strong>
-            <div className="toolbar-actions"><select aria-label="课程类型" value={courseType} onChange={(event) => setCourseType(event.target.value)}><option>全部课程类型</option><option>私教课</option><option>团体课</option></select><button className="button button-primary button-small" onClick={reserveNext}><Plus size={16} /> 预约课程</button></div>
+            <div className="period-switcher">
+              <button className="icon-button" aria-label="上一周" onClick={() => notify("已是当前可预约周期", "info")}><ChevronLeft size={17} /></button>
+              <strong>{mode === "week" ? "2026 年 7 月 27 日 — 8 月 2 日" : "2026 年 7 月"}</strong>
+              <button className="icon-button" aria-label="下一周" onClick={() => notify("下一周期将在教练开放后显示", "info")}><ChevronRight size={17} /></button>
+            </div>
+            <span className="private-only"><UserRoundCheck size={15} /> 仅一对一私教</span>
           </div>
-          {mode === "week" ? <div className="booking-week">
-            {state.bookings.map((booking) => {
-              const matchesFilter = visibleBookings.some((item) => item.id === booking.id);
-              return (
-              <div className="booking-day" key={booking.id}>
-                <header><span>{booking.day}</span><b>{booking.date}</b></header>
-                <article className={`booking-slot status-${booking.status} ${matchesFilter ? "" : "is-filtered"}`}>
-                  <span>{booking.time}</span><h3>{booking.title}</h3><small>{booking.coach}</small><em>{booking.status}</em>
-                  {matchesFilter && (booking.status === "可预约" || booking.status === "已预约") ? <button onClick={() => updateBooking(booking.id)}>{booking.status === "可预约" ? "立即预约" : "取消预约"}</button> : null}
-                </article>
+          {mode === "week" ? (
+            <>
+              <div className="booking-grid-scroll">
+                <div className="booking-time-grid" aria-label="一对一私教周课表">
+                  <div className="booking-grid-corner">时间</div>
+                  {state.bookings.map((booking, index) => <button key={`head-${booking.id}`} className={activeDay === index ? "active" : ""} onClick={() => setActiveDay(index)}><span>{booking.day}</span><b>{booking.date}</b>{index === 2 ? <em>今天</em> : null}</button>)}
+                  {hours.map((hour) => (
+                    <div className="booking-grid-row" key={hour}>
+                      <time>{hour}</time>
+                      {state.bookings.map((booking) => {
+                        const session = booking.time.startsWith(hour);
+                        return <div className={`booking-grid-cell ${session ? "has-session" : ""}`} key={`${booking.id}-${hour}`}>{session ? <button className={`private-session status-${booking.status}`} onClick={() => handleSession(booking)}><span>{booking.time}</span><b>一对一私教</b><small>{booking.coach}</small><em>{booking.status}</em></button> : null}</div>;
+                      })}
+                    </div>
+                  ))}
+                </div>
               </div>
-              );
-            })}
-          </div> : <div className="booking-month" aria-label="2026 年 7 月课程月历">
-            {Array.from({ length: 35 }, (_, index) => index + 1).map((day) => {
-              const booking = state.bookings.find((item) => Number(item.date.split("/")[1]) === day);
-              return <button key={day} className={booking ? `has-class status-${booking.status}` : ""} onClick={() => booking ? notify(`${booking.date} ${booking.time} · ${booking.title}`) : undefined}><span>{day <= 31 ? day : ""}</span>{booking ? <small>{booking.title}</small> : null}</button>;
-            })}
-          </div>}
+              <div className="booking-mobile-agenda">
+                <div className="booking-day-strip">
+                  {state.bookings.map((booking, index) => <button key={`mobile-${booking.id}`} className={activeDay === index ? "active" : ""} onClick={() => setActiveDay(index)}><span>{booking.day.replace("周", "")}</span><b>{booking.date.split("/")[1]}</b>{index === 2 ? <i /> : null}</button>)}
+                </div>
+                <div className="mobile-agenda-list">
+                  {hours.map((hour) => {
+                    const booking = state.bookings[activeDay];
+                    const session = booking.time.startsWith(hour);
+                    return <div key={`agenda-${hour}`} className={session ? "has-session" : ""}><time>{hour}</time>{session ? <button className={`private-session status-${booking.status}`} onClick={() => handleSession(booking)}><span>{booking.time}</span><b>一对一私教 · {booking.coach}</b><em>{booking.status}{booking.status === "可预约" ? " · 点击预约" : booking.status === "已预约" ? " · 点击取消" : ""}</em></button> : <span>暂无开放时段</span>}</div>;
+                  })}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="booking-month-head">{weeklyDays.map((day) => <span key={day}>周{day}</span>)}</div>
+              <div className="booking-month booking-month-new" aria-label="2026 年 7 月私教课月历">
+                {monthCells.map((cell, index) => {
+                  if (!cell) return <div className="month-empty" key={`empty-${index}`} />;
+                  const count = monthCounts[cell.key] ?? 0;
+                  const booking = state.bookings.find((item) => item.date === cell.key);
+                  return <button key={cell.key} className={`${count ? "has-class" : ""} ${cell.nextMonth ? "next-month" : ""}`} onClick={() => {
+                    if (booking) {
+                      setActiveDay(state.bookings.findIndex((item) => item.id === booking.id));
+                      setMode("week");
+                    } else {
+                      notify(count ? `${cell.key} 共 ${count} 节一对一私教` : `${cell.key} 暂无开放私教时段`, "info");
+                    }
+                  }}><span>{cell.day}</span>{count ? <b>{count} 节私教</b> : <small>暂无排期</small>}{booking ? <em className={`status status-${booking.status}`}>{booking.time.split("–")[0]} · {booking.status}</em> : null}</button>;
+                })}
+              </div>
+            </>
+          )}
           <div className="calendar-legend"><span><i className="legend-done" /> 已完成</span><span><i className="legend-booked" /> 已预约</span><span><i className="legend-open" /> 可预约</span><span><i className="legend-wait" /> 待确认</span></div>
         </Card>
         <div className="side-stack">
           <Card className="coach-availability">
             <div className="coach-hero"><Avatar name="邵教练" size="lg" /><div><span className="eyebrow">本周安排</span><h3>邵教练</h3></div></div>
-            <div className="availability"><strong>86%</strong><ProgressBar value={86} /><span>本周可约时段</span></div>
-            <button className="button button-secondary full" onClick={() => setMode("month")}><CalendarCheck size={17} /> 查看完整时间表</button>
+            <div className="availability"><strong>3</strong><ProgressBar value={43} /><span>本周剩余可约时段</span></div>
+            <button className="button button-secondary full" onClick={() => setMode("month")}><CalendarCheck size={17} /> 查看月度排期</button>
           </Card>
           <Card>
             <SectionTitle title="我的上课统计" />
-            <div className="number-grid"><div><span>本周已上课</span><b>4 节</b></div><div><span>本周已预约</span><b>2 节</b></div><div><span>本月累计</span><b>16 节</b></div><div><span>出勤率</span><b>92%</b></div></div>
+            <div className="number-grid"><div><span>本周已上课</span><b>2 节</b></div><div><span>本周已预约</span><b>2 节</b></div><div><span>本月累计</span><b>9 节</b></div><div><span>剩余课时</span><b>15 节</b></div></div>
           </Card>
           <Card>
             <SectionTitle title="预约规则" />
@@ -503,9 +574,9 @@ export function BenefitsView() {
   const { notify } = usePortal();
   const benefits = [
     { icon: UserRoundCheck, title: "一对一专属指导", text: "邵教练根据你的训练反馈与身体变化实时调整方案。" },
-    { icon: CalendarCheck, title: "优先预约特权", text: "私教课与精品小班优先锁定，重要时段提前开放。" },
+    { icon: CalendarCheck, title: "优先预约特权", text: "一对一私教时段优先锁定，重要周期提前开放。" },
     { icon: Activity, title: "完整身体评估", text: "周期性体态、体成分与运动表现评估，趋势持续可追踪。" },
-    { icon: Sparkles, title: "Hermes 智能助理", text: "全天候训练与饮食答疑，重要建议由教练确认后推送。" },
+    { icon: HeartPulse, title: "教练周期复盘", text: "训练、饮食与恢复由邵教练统一复盘并给出下一阶段安排。" },
     { icon: Apple, title: "个性化饮食方案", text: "按目标、口味与武汉本地饮食习惯制定可执行方案。" },
     { icon: BadgeCheck, title: "隐私与数据保护", text: "数据最小化采集、分角色访问，并提供导出和注销流程。" },
   ];
@@ -520,7 +591,7 @@ export function BenefitsView() {
       </div>
       <Card>
         <SectionTitle title="会员服务承诺" />
-        <div className="promise-grid"><div><b>24 小时</b><span>工作日消息响应</span></div><div><b>每 4 周</b><span>计划复盘与更新</span></div><div><b>100%</b><span>训练记录可导出</span></div><div><b>7 × 24</b><span>Hermes 智能答疑</span></div></div>
+        <div className="promise-grid"><div><b>24 小时</b><span>工作日消息响应</span></div><div><b>每 4 周</b><span>计划复盘与更新</span></div><div><b>100%</b><span>训练记录可导出</span></div><div><b>一对一</b><span>专属私教服务</span></div></div>
       </Card>
     </div>
   );

@@ -15,7 +15,7 @@ type PortalContextValue = {
   state: PortalState;
   loading: boolean;
   toasts: Toast[];
-  refresh: () => Promise<void>;
+  refresh: (memberId?: string) => Promise<void>;
   notify: (message: string, tone?: Toast["tone"]) => void;
   addWater: (amount?: number) => void;
   toggleMeal: (id: string) => void;
@@ -44,10 +44,11 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (memberId?: string) => {
     setLoading(true);
     try {
-      const response = await fetch("/api/data", { credentials: "include" });
+      const query = memberId ? `?member_id=${encodeURIComponent(memberId)}` : "";
+      const response = await fetch(`/api/data${query}`, { credentials: "include" });
       if (!response.ok) return;
       const result = await response.json() as { state?: PortalState };
       if (result.state) setState(result.state);

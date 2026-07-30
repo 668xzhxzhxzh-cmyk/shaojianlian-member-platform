@@ -8,6 +8,11 @@ export type PortalView =
   | "assistant"
   | "benefits"
   | "coach"
+  | "coach-members"
+  | "coach-schedule"
+  | "coach-training"
+  | "coach-nutrition"
+  | "coach-body"
   | "admin";
 
 export type Role = "member" | "coach" | "admin";
@@ -101,13 +106,13 @@ export const demoState: PortalState = {
   checkinDates: ["07/23", "07/24", "07/25", "07/26", "07/27", "07/28"],
   streak: 18,
   bookings: [
-    { id: "b1", day: "周一", date: "7/27", time: "10:00–11:00", title: "力量基础课", coach: "邵教练", status: "已完成" },
-    { id: "b2", day: "周二", date: "7/28", time: "10:00–10:45", title: "HIIT 燃脂课", coach: "邵教练", status: "已完成" },
-    { id: "b3", day: "周三", date: "7/29", time: "10:00–11:00", title: "下肢力量课", coach: "邵教练", status: "已预约" },
-    { id: "b4", day: "周四", date: "7/30", time: "14:00–15:00", title: "功能训练", coach: "邵教练", status: "待确认" },
-    { id: "b5", day: "周五", date: "7/31", time: "18:00–19:00", title: "核心强化课", coach: "邵教练", status: "可预约" },
-    { id: "b6", day: "周六", date: "8/1", time: "18:00–19:00", title: "一对一私教", coach: "邵教练", status: "可预约" },
-    { id: "b7", day: "周日", date: "8/2", time: "10:00–11:00", title: "伸展放松课", coach: "邵教练", status: "可预约" },
+    { id: "b1", day: "周一", date: "7/27", time: "09:00–10:00", title: "一对一私教", coach: "邵教练", status: "已完成" },
+    { id: "b2", day: "周二", date: "7/28", time: "11:00–12:00", title: "一对一私教", coach: "邵教练", status: "已完成" },
+    { id: "b3", day: "周三", date: "7/29", time: "10:00–11:00", title: "一对一私教", coach: "邵教练", status: "已预约" },
+    { id: "b4", day: "周四", date: "7/30", time: "14:00–15:00", title: "一对一私教", coach: "邵教练", status: "待确认" },
+    { id: "b5", day: "周五", date: "7/31", time: "18:00–19:00", title: "一对一私教", coach: "邵教练", status: "可预约" },
+    { id: "b6", day: "周六", date: "8/1", time: "16:00–17:00", title: "一对一私教", coach: "邵教练", status: "可预约" },
+    { id: "b7", day: "周日", date: "8/2", time: "10:00–11:00", title: "一对一私教", coach: "邵教练", status: "可预约" },
   ],
   suggestions: [
     {
@@ -151,11 +156,11 @@ export const trainingExercises = [
 ];
 
 export const memberRows = [
-  { name: "李明远", plan: "增肌进阶 · 力量提升", recovery: 82, attendance: 92, risk: "良好", last: "今天 07:30" },
-  { name: "王雨桐", plan: "一对一私教", recovery: 65, attendance: 88, risk: "注意", last: "昨天 18:20" },
-  { name: "张小北", plan: "HIIT 高强度燃脂", recovery: 76, attendance: 96, risk: "良好", last: "今天 06:45" },
-  { name: "陈思颖", plan: "核心强化课", recovery: 58, attendance: 74, risk: "注意", last: "2 天前 21:10" },
-  { name: "刘一航", plan: "功能训练", recovery: 42, attendance: 58, risk: "需关注", last: "3 天前 19:30" },
+  { id: "member-li", name: "李明远", plan: "减脂塑形 · 私教 24 节", goal: "体脂降至 15%", recovery: 82, attendance: 92, risk: "良好", last: "今天 07:30", phone: "138****5206", next: "今天 14:00" },
+  { id: "member-wang", name: "王雨桐", plan: "体态改善 · 私教 18 节", goal: "改善圆肩与骨盆前倾", recovery: 65, attendance: 88, risk: "注意", last: "昨天 18:20", phone: "136****1183", next: "明天 09:30" },
+  { id: "member-zhang", name: "张小北", plan: "增肌进阶 · 私教 30 节", goal: "增肌 3 kg", recovery: 76, attendance: 96, risk: "良好", last: "今天 06:45", phone: "159****9021", next: "周六 10:00" },
+  { id: "member-chen", name: "陈思颖", plan: "核心重建 · 私教 20 节", goal: "提升核心稳定", recovery: 58, attendance: 74, risk: "注意", last: "2 天前 21:10", phone: "158****3378", next: "周五 18:00" },
+  { id: "member-liu", name: "刘一航", plan: "运动表现 · 私教 16 节", goal: "恢复膝关节活动度", recovery: 42, attendance: 58, risk: "需关注", last: "3 天前 19:30", phone: "137****6152", next: "待安排" },
 ];
 
 export function formatShanghaiDate(date = new Date()) {
