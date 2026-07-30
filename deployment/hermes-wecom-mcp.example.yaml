@@ -23,3 +23,21 @@ mcp_servers:
 platform_toolsets:
   wecom:
     - shao-coach
+
+# 最终生产策略：私聊只允许唯一教练；群聊同时校验精确 chatid 和教练 userid。
+# 第一次在目标群 @ 机器人后，从 Hermes 会话元数据取得 chatid，再运行：
+# sudo /usr/local/sbin/shao-wecom-lock-group <chatid>
+platforms:
+  wecom:
+    enabled: true
+    extra:
+      dm_policy: allowlist
+      allow_from:
+        - REPLACE_WITH_COACH_USERID
+      group_policy: allowlist
+      group_allow_from:
+        - REPLACE_WITH_AUTHORIZED_GROUP_CHATID
+      groups:
+        REPLACE_WITH_AUTHORIZED_GROUP_CHATID:
+          allow_from:
+            - REPLACE_WITH_COACH_USERID

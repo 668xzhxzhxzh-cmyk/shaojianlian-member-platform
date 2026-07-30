@@ -89,6 +89,14 @@ sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes mcp test 
 sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes tools --summary
 ```
 
+目标群第一次 `@AI健身助理` 后，从 WeCom 会话元数据读取真实 chatid，并立即锁定为唯一授权群：
+
+```bash
+sudo /usr/local/sbin/shao-wecom-lock-group <chatid>
+```
+
+锁定脚本会同时设置群 chatid 白名单和群内教练 userid 白名单，原子保存配置，备份旧文件并验证同一个 Hermes 网关重启成功。
+
 ## 企业微信客户联系凭据
 
 管理员在企业微信后台完成以下一次性配置：
