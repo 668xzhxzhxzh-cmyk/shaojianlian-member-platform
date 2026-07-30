@@ -90,6 +90,9 @@ export function createWecomContactService({ pool }) {
     );
     const row = result.rows[0];
     if (!row) throw publicError(404, "未找到该 member_id，或该会员未绑定给当前教练");
+    await auditOperation(coachUserId, "wecom_member_viewed", {
+      member_id: memberId,
+    });
     const state = row.state_json || {};
     return {
       member_id: row.id,
