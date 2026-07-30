@@ -2,6 +2,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import Image from "next/image";
+import { useState } from "react";
 
 export function Card({
   children,
@@ -147,6 +148,7 @@ export function TrendChart({
   compact?: boolean;
   valueSuffix?: string;
 }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const width = compact ? 360 : 760;
   const padding = compact ? { top: 10, right: 10, bottom: 10, left: 10 } : { top: 18, right: 24, bottom: 31, left: 42 };
   const values = data.map((item) => Number(item[dataKey])).filter(Number.isFinite);
@@ -163,34 +165,65 @@ export function TrendChart({
 
   if (!values.length) return <div className="empty-hint">暂无趋势数据</div>;
 
+  const hovered = hoveredIndex === null ? null : points[hoveredIndex];
   return (
-    <svg
-      className={`trend-chart ${compact ? "trend-chart-compact" : ""}`}
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label={`${dataKey} 趋势图`}
-      preserveAspectRatio="xMidYMid meet"
-    >
-      {!compact ? [0, 1, 2, 3].map((line) => {
-        const y = padding.top + (line / 3) * plotHeight;
-        const label = max - (line / 3) * spread;
-        return (
-          <g key={line}>
-            <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} className="trend-grid-line" />
-            <text x={padding.left - 9} y={y + 4} textAnchor="end" className="trend-axis-label">{label.toFixed(1)}</text>
+    <div className={`trend-chart-interactive ${compact ? "is-compact" : ""}`} onMouseLeave={() => setHoveredIndex(null)}>
+      <svg
+        className={`trend-chart ${compact ? "trend-chart-compact" : ""}`}
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`${dataKey} 趋势图，可将鼠标移到数据点查看具体数值`}
+        preserveAspectRatio="xMidYMid meet"
+        onMouseMove={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const localX = ((event.clientX - rect.left) / rect.width) * width;
+          const nearest = points.reduce((best, point, index) => Math.abs(point.x - localX) < Math.abs(points[best].x - localX) ? index : best, 0);
+          setHoveredIndex((current) => current === nearest ? current : nearest);
+        }}
+      >
+        {!compact ? [0, 1, 2, 3].map((line) => {
+          const y = padding.top + (line / 3) * plotHeight;
+          const label = max - (line / 3) * spread;
+          return (
+            <g key={line}>
+              <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} className="trend-grid-line" />
+              <text x={padding.left - 9} y={y + 4} textAnchor="end" className="trend-axis-label">{label.toFixed(1)}</text>
+            </g>
+          );
+        }) : null}
+        <polyline points={points.map((point) => `${point.x},${point.y}`).join(" ")} className="trend-line" />
+        {points.map((point, index) => (
+          <g
+            key={`${point.label}-${index}`}
+            className={hoveredIndex === index ? "trend-point active" : "trend-point"}
+            tabIndex={0}
+            role="button"
+            aria-label={`${point.label}：${point.value}${valueSuffix}`}
+            onMouseEnter={() => setHoveredIndex(index)}
+            onFocus={() => setHoveredIndex(index)}
+            onBlur={() => setHoveredIndex(null)}
+            onClick={() => setHoveredIndex(index)}
+          >
+            <circle cx={point.x} cy={point.y} r={compact ? 12 : 15} className="trend-hit-area" />
+            <circle cx={point.x} cy={point.y} r={hoveredIndex === index ? (compact ? 5 : 6.5) : (compact ? 3 : 4.5)} className="trend-dot" />
+            {!compact ? <text x={point.x} y={height - 8} textAnchor="middle" className="trend-axis-label">{point.label}</text> : null}
           </g>
-        );
-      }) : null}
-      <polyline points={points.map((point) => `${point.x},${point.y}`).join(" ")} className="trend-line" />
-      {points.map((point, index) => (
-        <g key={`${point.label}-${index}`}>
-          <circle cx={point.x} cy={point.y} r={compact ? 3 : 4.5} className="trend-dot">
-            <title>{`${point.label}：${point.value}${valueSuffix}`}</title>
-          </circle>
-          {!compact ? <text x={point.x} y={height - 8} textAnchor="middle" className="trend-axis-label">{point.label}</text> : null}
-        </g>
-      ))}
-    </svg>
+        ))}
+      </svg>
+      {hovered ? (
+        <div
+          className="trend-tooltip"
+          role="status"
+          style={{
+            left: `${(hovered.x / width) * 100}%`,
+            top: `${(hovered.y / height) * 100}%`,
+          }}
+        >
+          <span>{hovered.label || `第 ${hoveredIndex! + 1} 条`}</span>
+          <b>{hovered.value}{valueSuffix}</b>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

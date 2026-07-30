@@ -77,3 +77,63 @@ test("Hermes member tools reject invalid bearer and unauthorized coach userid", 
     /没有 Hermes 管理工具权限/,
   );
 });
+
+test("Hermes can add and delete a private session for an exact bound member", async () => {
+  process.env.HERMES_TOOL_TOKEN = "website-control-tool-token";
+  process.env.WECOM_ALLOWED_COACH_USERIDS = "coach-user-1";
+  let state = {
+    profile: { id: "member-1", name: "测试会员" },
+    bookings: [],
+  };
+  const pool = {
+    async query(sql, params = []) {
+      if (String(sql).includes("SELECT u.id,u.name,p.state_json")) {
+        return { rows: [{ id: "member-1", name: "测试会员", state_json: state }] };
+      }
+      if (String(sql).includes("INSERT INTO portal_state")) {
+        state = params[1];
+        return { rows: [] };
+      }
+      if (String(sql).includes("INSERT INTO audit_log")) return { rows: [] };
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+  const service = createWecomContactService({ pool });
+  const added = response();
+  await service.handleInternalTool(
+    request({
+      address: "127.0.0.1",
+      token: process.env.HERMES_TOOL_TOKEN,
+      body: {
+        operation: "add_private_session",
+        coach_userid: "coach-user-1",
+        member_id: "member-1",
+        day: "周五",
+        date: "7/31",
+        time: "18:00–19:00",
+        focus: "下肢力量",
+      },
+    }),
+    added,
+  );
+  assert.equal(added.status, 201);
+  assert.equal(state.bookings.length, 1);
+  assert.equal(state.bookings[0].focus, "下肢力量");
+
+  const deleted = response();
+  await service.handleInternalTool(
+    request({
+      address: "::1",
+      token: process.env.HERMES_TOOL_TOKEN,
+      body: {
+        operation: "delete_private_session",
+        coach_userid: "coach-user-1",
+        member_id: "member-1",
+        session_id: state.bookings[0].id,
+      },
+    }),
+    deleted,
+  );
+  assert.equal(deleted.status, 200);
+  assert.equal(state.bookings.length, 0);
+});

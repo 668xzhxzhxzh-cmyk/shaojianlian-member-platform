@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "邵教练专属会员平台",
     short_name: "邵教练会员",
-    description: "一对一训练、饮食、打卡、身体数据与私教预约。",
+    description: "一对一训练、饮食、打卡、身体数据与教练课程排期。",
     start_url: "/",
     display: "standalone",
     background_color: "#fbfaf6",

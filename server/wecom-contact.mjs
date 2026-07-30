@@ -36,6 +36,30 @@ export function createWecomContactService({ pool }) {
       const member = await getMemberById(body.member_id, coachUserId);
       return sendJson(response, 200, { member });
     }
+    if (operation === "add_private_session") {
+      const result = await addPrivateSession(body, coachUserId);
+      return sendJson(response, 201, result);
+    }
+    if (operation === "delete_private_session") {
+      const result = await deletePrivateSession(body, coachUserId);
+      return sendJson(response, 200, result);
+    }
+    if (operation === "update_training_plan") {
+      const result = await updateTrainingPlan(body, coachUserId);
+      return sendJson(response, 200, result);
+    }
+    if (operation === "update_nutrition_plan") {
+      const result = await updateNutritionPlan(body, coachUserId);
+      return sendJson(response, 200, result);
+    }
+    if (operation === "add_body_feedback") {
+      const result = await addBodyFeedback(body, coachUserId);
+      return sendJson(response, 201, result);
+    }
+    if (operation === "update_member_profile") {
+      const result = await updateMemberProfile(body, coachUserId);
+      return sendJson(response, 200, result);
+    }
     if (operation === "list_customer_ids") {
       const customers = await listCustomerIds(coachUserId);
       return sendJson(response, 200, { customers });
@@ -107,7 +131,142 @@ export function createWecomContactService({ pool }) {
       checkin_dates: Array.isArray(state.checkinDates) ? state.checkinDates.slice(-30) : [],
       streak: Number(state.streak || 0),
       suggestions: Array.isArray(state.suggestions) ? state.suggestions.slice(-10) : [],
+      training_plan: state.trainingPlan || null,
+      nutrition_plan: state.nutritionPlan || null,
+      body_feedbacks: Array.isArray(state.bodyFeedbacks) ? state.bodyFeedbacks.slice(-10) : [],
     };
+  }
+
+  async function loadBoundMemberState(rawMemberId, coachUserId) {
+    const memberId = normalizeId(rawMemberId, "member_id");
+    const result = await pool.query(
+      `SELECT u.id,u.name,p.state_json
+       FROM users u
+       JOIN member_wecom_bindings b ON b.member_id=u.id AND b.status='active'
+       LEFT JOIN portal_state p ON p.user_id=u.id
+       WHERE u.id=$1 AND u.role='member' AND u.status='active' AND b.coach_userid=$2
+       LIMIT 1`,
+      [memberId, coachUserId],
+    );
+    const row = result.rows[0];
+    if (!row) throw publicError(404, "未找到该 member_id，或该会员未绑定给当前教练");
+    return { memberId, name: row.name, state: row.state_json || {} };
+  }
+
+  async function saveMemberState(memberId, state, coachUserId, action, detail) {
+    await pool.query(
+      "INSERT INTO portal_state (user_id,state_json,updated_at) VALUES ($1,$2,NOW()) ON CONFLICT (user_id) DO UPDATE SET state_json=EXCLUDED.state_json,updated_at=NOW()",
+      [memberId, state],
+    );
+    await auditOperation(coachUserId, action, { member_id: memberId, ...detail });
+  }
+
+  async function addPrivateSession(body, coachUserId) {
+    const { memberId, state } = await loadBoundMemberState(body.member_id, coachUserId);
+    const rawDate = normalizeText(body.date, "上课日期", 20);
+    const day = normalizeText(body.day, "星期", 10);
+    const time = normalizeText(body.time, "上课时间", 30);
+    const focus = normalizeText(body.focus || "一对一私教", "训练重点", 120);
+    if (!/^\d{1,2}\/\d{1,2}$/.test(rawDate) || !/^\d{2}:\d{2}[–-]\d{2}:\d{2}$/.test(time)) {
+      throw publicError(400, "课程日期或时间格式无效");
+    }
+    const booking = {
+      id: `hermes-booking-${randomUUID()}`,
+      day,
+      date: rawDate,
+      time,
+      title: "一对一私教",
+      coach: "邵教练",
+      focus,
+      status: ["已预约", "待确认", "已完成"].includes(String(body.status)) ? String(body.status) : "已预约",
+    };
+    state.bookings = [...(Array.isArray(state.bookings) ? state.bookings : []), booking];
+    await saveMemberState(memberId, state, coachUserId, "hermes_private_session_added", { booking });
+    return { changed: true, member_id: memberId, booking, sync: "网站页面已自动同步" };
+  }
+
+  async function deletePrivateSession(body, coachUserId) {
+    const { memberId, state } = await loadBoundMemberState(body.member_id, coachUserId);
+    const sessionId = normalizeId(body.session_id, "session_id", 120);
+    const booking = (Array.isArray(state.bookings) ? state.bookings : []).find((item) => item.id === sessionId);
+    if (!booking) throw publicError(404, "找不到该 session_id 对应的课程");
+    state.bookings = state.bookings.filter((item) => item.id !== sessionId);
+    await saveMemberState(memberId, state, coachUserId, "hermes_private_session_deleted", { session_id: sessionId, booking });
+    return { changed: true, member_id: memberId, deleted_session: booking, sync: "网站页面已自动同步" };
+  }
+
+  async function updateTrainingPlan(body, coachUserId) {
+    const { memberId, state } = await loadBoundMemberState(body.member_id, coachUserId);
+    const current = state.trainingPlan && typeof state.trainingPlan === "object" ? state.trainingPlan : {};
+    const days = Array.isArray(body.days) ? body.days.slice(0, 7).map((day, index) => ({
+      id: String(day.id || `day-${index + 1}`).slice(0, 80),
+      title: normalizeText(day.title, "训练日标题", 80),
+      duration: normalizeText(day.duration || "60 分钟", "训练时长", 30),
+      exercises: Array.isArray(day.exercises) ? day.exercises.slice(0, 20).map((item) => normalizeText(item, "训练动作", 120)) : [],
+    })) : current.days;
+    state.trainingPlan = {
+      ...current,
+      phase: normalizeText(body.phase || current.phase || "当前周期", "训练阶段", 40),
+      goal: normalizeText(body.goal || current.goal || "保持稳定训练", "训练目标", 160),
+      frequency: Math.min(7, Math.max(1, Number(body.frequency || current.frequency || 3))),
+      focus: normalizeText(body.focus || current.focus || "动作质量", "训练重点", 180),
+      note: normalizeText(body.note || current.note || "由 Hermes 按教练指令更新", "教练备注", 500),
+      days: days || [],
+      updatedAt: new Date().toISOString().slice(0, 10),
+    };
+    await saveMemberState(memberId, state, coachUserId, "hermes_training_plan_updated", { training_plan: state.trainingPlan });
+    return { changed: true, member_id: memberId, training_plan: state.trainingPlan, sync: "网站页面已自动同步" };
+  }
+
+  async function updateNutritionPlan(body, coachUserId) {
+    const { memberId, state } = await loadBoundMemberState(body.member_id, coachUserId);
+    const current = state.nutritionPlan && typeof state.nutritionPlan === "object" ? state.nutritionPlan : {};
+    const meals = Array.isArray(body.meals) ? body.meals.slice(0, 6).map((meal) => ({
+      type: normalizeText(meal.type, "餐次", 10),
+      time: normalizeText(meal.time, "用餐时间", 10),
+      food: normalizeText(meal.food, "餐食内容", 300),
+      calories: Math.min(3000, Math.max(0, Number(meal.calories || 0))),
+    })) : current.meals;
+    state.nutritionPlan = {
+      ...current,
+      calories: Math.min(6000, Math.max(800, Number(body.calories || current.calories || 1800))),
+      protein: Math.min(400, Math.max(0, Number(body.protein || current.protein || 120))),
+      carbs: Math.min(800, Math.max(0, Number(body.carbs || current.carbs || 180))),
+      fat: Math.min(300, Math.max(0, Number(body.fat || current.fat || 60))),
+      reminder: normalizeText(body.reminder || current.reminder || "按训练状态调整摄入", "执行提醒", 600),
+      meals: meals || [],
+      updatedAt: new Date().toISOString().slice(0, 10),
+    };
+    await saveMemberState(memberId, state, coachUserId, "hermes_nutrition_plan_updated", { nutrition_plan: state.nutritionPlan });
+    return { changed: true, member_id: memberId, nutrition_plan: state.nutritionPlan, sync: "网站页面已自动同步" };
+  }
+
+  async function addBodyFeedback(body, coachUserId) {
+    const { memberId, state } = await loadBoundMemberState(body.member_id, coachUserId);
+    const risk = ["良好", "注意", "需关注"].includes(String(body.risk)) ? String(body.risk) : "注意";
+    const feedback = {
+      id: `hermes-feedback-${randomUUID()}`,
+      date: new Date().toISOString().slice(0, 10),
+      summary: normalizeText(body.summary, "身体反馈", 1000),
+      nextFocus: normalizeText(body.next_focus, "观察重点", 500),
+      risk,
+    };
+    state.bodyFeedbacks = [...(Array.isArray(state.bodyFeedbacks) ? state.bodyFeedbacks : []), feedback].slice(-100);
+    await saveMemberState(memberId, state, coachUserId, "hermes_body_feedback_added", { feedback });
+    return { changed: true, member_id: memberId, feedback, sync: "网站页面已自动同步" };
+  }
+
+  async function updateMemberProfile(body, coachUserId) {
+    const { memberId, state } = await loadBoundMemberState(body.member_id, coachUserId);
+    const profile = state.profile && typeof state.profile === "object" ? state.profile : {};
+    for (const [field, label] of [["plan", "会员计划"], ["expires_at", "到期日期"], ["level", "会员等级"]]) {
+      if (body[field] !== undefined && String(body[field]).trim()) {
+        profile[field === "expires_at" ? "expiresAt" : field] = normalizeText(body[field], label, 120);
+      }
+    }
+    state.profile = profile;
+    await saveMemberState(memberId, state, coachUserId, "hermes_member_profile_updated", { profile });
+    return { changed: true, member_id: memberId, profile, sync: "网站页面已自动同步" };
   }
 
   async function listCustomerIds(coachUserId) {

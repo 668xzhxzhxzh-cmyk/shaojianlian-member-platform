@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -16,7 +16,6 @@ import {
   FileDown,
   MessageCircleMore,
   Plus,
-  RefreshCcw,
   Search,
   Send,
   Settings,
@@ -84,12 +83,12 @@ export function CoachView({ openAssistant }: { openAssistant: () => void }) {
 
   return (
     <div className="view-stack management-view">
-      <section className="welcome-row"><div><span className="eyebrow">教练工作台</span><h1>上午好，邵教练</h1><p>今天有 15 次预约、8 条 AI 建议等待确认。</p></div><div className="inline-actions"><button className="button button-secondary" onClick={() => notify("会员、预约与身体数据已同步")}><RefreshCcw size={17} /> 同步数据</button><button className="button button-primary" onClick={() => setNewMemberOpen(true)}><UserRoundPlus size={17} /> 新增会员</button></div></section>
+      <section className="welcome-row"><div><span className="eyebrow">教练工作台</span><h1>上午好，邵教练</h1><p>今天有 15 次排期、8 条 AI 建议等待确认；Hermes 修改会自动同步。</p></div><div className="inline-actions"><button className="button button-primary" onClick={() => setNewMemberOpen(true)}><UserRoundPlus size={17} /> 新增会员</button></div></section>
       <div className="stats-grid five">
         <StatCard icon={UsersRound} label="会员总数" value="128" note="较昨日 +8" />
         <StatCard icon={UserRoundPlus} label="今日新增" value="2" note="较昨日 +1" accent="amber" />
         <StatCard icon={Dumbbell} label="今日训练" value="15" note="完成率 75%" />
-        <StatCard icon={CalendarDays} label="本周预约" value="32" note="较上周 +6" accent="slate" />
+        <StatCard icon={CalendarDays} label="本周排期" value="32" note="较上周 +6" accent="slate" />
         <StatCard icon={CircleDollarSign} label="本月收入" value="¥128,620" note="较上月 +13%" />
       </div>
       <div className="coach-dashboard-grid">
@@ -102,7 +101,7 @@ export function CoachView({ openAssistant }: { openAssistant: () => void }) {
           <button className="text-button centered" onClick={() => { setSearch(""); setRisk("全部风险等级"); notify("已显示全部会员"); }}>查看全部会员 <ArrowRight size={15} /></button>
         </Card>
         <Card>
-          <SectionTitle title="今日预约" />
+          <SectionTitle title="今日排期" />
           <div className="appointment-list">
             {[
               ["08:00", "李明远", "私教课 · 力量进阶", "已开始"],
@@ -153,19 +152,45 @@ function Task({ icon: Icon, label, count, onClick }: { icon: typeof MessageCircl
   return <button onClick={onClick}><Icon size={20} /><span>{label}<small>{count} 项待处理</small></span><b>{count}</b><ArrowRight size={16} /></button>;
 }
 
-export function AdminView() {
+type AdminSection = "overview" | "notifications" | "users" | "settings";
+type AdminUser = { id: string; name: string; role: string; phone: string; status: string };
+
+export function AdminView({ section = "overview" }: { section?: AdminSection }) {
   const { notify } = usePortal();
   const [accountOpen, setAccountOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const users = [
-    ["邵教练", "超级管理员 / 主教练", "138****6608", "正常"],
-    ["李明", "尊享会员", "138****5206", "正常"],
-    ["王芳", "年度会员", "136****1183", "正常"],
-    ["张伟", "季度会员", "159****9021", "待激活"],
-  ].filter((user) => !search || user.some((value) => value.includes(search)));
+  const [managedUser, setManagedUser] = useState<AdminUser | null>(null);
+  const [users, setUsers] = useState<AdminUser[]>([
+    { id: "admin-shao", name: "邵教练", role: "管理员 / 主教练", phone: "138****6608", status: "正常" },
+    { id: "member-li", name: "李明", role: "尊享会员", phone: "138****5206", status: "正常" },
+    { id: "member-wang", name: "王芳", role: "年度会员", phone: "136****1183", status: "正常" },
+    { id: "member-zhang", name: "张伟", role: "季度会员", phone: "159****9021", status: "待激活" },
+  ]);
+  const [notifications, setNotifications] = useState([
+    { id: "n1", title: "课程排期待确认", detail: "李明 · 7 月 31 日 18:00 一对一私教", read: false },
+    { id: "n2", title: "Hermes 已更新训练方案", detail: "member_id=member-wang · 训练频次调整为每周 3 次", read: false },
+    { id: "n3", title: "会员身体数据已更新", detail: "张伟新增体重与体脂记录", read: true },
+  ]);
+  const [settings, setSettings] = useState({ city: "鄂州", timezone: "Asia/Shanghai", hermesAutoSync: true, memberRegistration: true });
+  const visibleUsers = users.filter((user) => !search || `${user.name}${user.role}${user.phone}${user.status}`.includes(search));
+
+  useEffect(() => {
+    fetch("/api/users", { credentials: "include" })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const result = await response.json() as { users?: Array<{ id: string; name: string; role: string; phone: string; status: string }> };
+        if (!result.users?.length) return;
+        setUsers(result.users.map((user) => ({
+          ...user,
+          role: user.role === "admin" ? "管理员" : user.role === "coach" ? "教练" : "会员",
+          status: user.status === "active" ? "正常" : "已停用",
+        })));
+      })
+      .catch(() => undefined);
+  }, []);
 
   function exportData() {
-    const csv = "\uFEFF姓名,角色,手机号,状态\n" + users.map((user) => user.map((value) => `"${value}"`).join(",")).join("\n");
+    const csv = "\uFEFF姓名,角色,手机号,状态\n" + visibleUsers.map((user) => [user.name, user.role, user.phone, user.status].map((value) => `"${value}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -196,26 +221,118 @@ export function AdminView() {
           notify(copied ? `${name} 已创建，临时密码已复制` : `${name} 已创建，临时密码：${result.temporaryPassword}`, copied ? "success" : "info");
         }
       }
+      setUsers((current) => [...current, { id: `local-${Date.now()}`, name, phone: String(data.get("phone") || ""), role: String(data.get("role") || "会员"), status: "正常" }]);
       setAccountOpen(false);
     } catch (error) {
       notify(error instanceof Error ? error.message : "账号创建失败", "warning");
     }
   }
 
+  async function saveManagedUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!managedUser) return;
+    const data = new FormData(event.currentTarget);
+    const role = String(data.get("role") || managedUser.role);
+    const status = String(data.get("status") || managedUser.status);
+    const next = { ...managedUser, role, status };
+    setUsers((current) => current.map((user) => user.id === next.id ? next : user));
+    try {
+      await fetch("/api/users", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: next.id, role: role === "管理员" ? "admin" : role === "教练" ? "coach" : "member", status: status === "正常" ? "active" : "disabled" }),
+      });
+    } catch {}
+    notify(`${next.name} 的账户权限已更新`);
+    setManagedUser(null);
+  }
+
+  if (section === "notifications") {
+    const unread = notifications.filter((item) => !item.read).length;
+    return (
+      <div className="view-stack management-view">
+        <section className="welcome-row"><div><span className="eyebrow">管理后台 · 消息通知</span><h1>消息通知中心</h1><p>{unread} 条未读消息，分别来自课程、Hermes 和会员数据更新。</p></div><button className="button button-secondary" onClick={() => { setNotifications((current) => current.map((item) => ({ ...item, read: true }))); notify("全部消息已标为已读"); }}><Check size={17} /> 全部已读</button></section>
+        <Card>
+          <SectionTitle title={`全部通知 · ${notifications.length}`} />
+          <div className="admin-notification-list">{notifications.map((item) => <button key={item.id} className={item.read ? "read" : ""} onClick={() => setNotifications((current) => current.map((notification) => notification.id === item.id ? { ...notification, read: true } : notification))}><span className="notification-dot" /><span><b>{item.title}</b><small>{item.detail}</small></span><em>{item.read ? "已读" : "未读"}</em><ArrowRight size={16} /></button>)}</div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (section === "settings") {
+    return (
+      <div className="view-stack management-view">
+        <section className="welcome-row"><div><span className="eyebrow">管理后台 · 系统设置</span><h1>系统设置</h1><p>配置站点、权限和 Hermes 自动同步策略。</p></div></section>
+        <div className="admin-grid">
+          <Card className="span-2">
+            <SectionTitle title="站点设置" />
+            <div className="settings-form">
+              <label>服务城市<input value={settings.city} onChange={(event) => setSettings((current) => ({ ...current, city: event.target.value }))} /></label>
+              <label>系统时区<select value={settings.timezone} onChange={(event) => setSettings((current) => ({ ...current, timezone: event.target.value }))}><option value="Asia/Shanghai">Asia/Shanghai（中国标准时间）</option></select></label>
+              <label className="setting-switch"><span><b>Hermes 自动同步</b><small>Hermes 调整会员数据后，页面无需手动同步。</small></span><input type="checkbox" checked={settings.hermesAutoSync} onChange={(event) => setSettings((current) => ({ ...current, hermesAutoSync: event.target.checked }))} /></label>
+              <label className="setting-switch"><span><b>开放会员注册</b><small>允许中国内地手机号自助注册。</small></span><input type="checkbox" checked={settings.memberRegistration} onChange={(event) => setSettings((current) => ({ ...current, memberRegistration: event.target.checked }))} /></label>
+              <button className="button button-primary" onClick={() => { window.localStorage.setItem("shao-admin-settings", JSON.stringify(settings)); notify("系统设置已保存"); }}><Settings size={17} /> 保存系统设置</button>
+            </div>
+          </Card>
+          <Card><SectionTitle title="集成状态" /><div className="integration-list"><button onClick={() => notify("DeepSeek 连接正常")}><span><Sparkles size={20} /><b>DeepSeek API</b></span><em className="ok">已接入</em></button><button onClick={() => notify("Hermes 网站管理工具已启用")}><span><Bot size={20} /><b>Hermes 控制工具</b></span><em className="ok">已启用</em></button><button onClick={() => notify("企业微信客户联系接口状态正常")}><span><MessageCircleMore size={20} /><b>企业微信</b></span><em className="ok">已接入</em></button></div></Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (section === "users") {
+    return (
+      <div className="view-stack management-view">
+        <section className="welcome-row"><div><span className="eyebrow">管理后台 · 用户与角色</span><h1>用户与角色</h1><p>管理账户状态与角色权限；会员数据仍按 member_id 隔离。</p></div><button className="button button-primary" onClick={() => setAccountOpen(true)}><Plus size={17} /> 新增账号</button></section>
+        <Card>
+          <SectionTitle title={`平台账户 · ${visibleUsers.length}`} action={<label className="search-input"><Search size={16} /><input placeholder="搜索姓名、手机号或角色" value={search} onChange={(event) => setSearch(event.target.value)} /></label>} />
+          <div className="admin-users admin-users-full">
+            {visibleUsers.map((user) => <div key={user.id}><Avatar name={user.name} /><span><b>{user.name}</b><small>{user.phone}</small><small>{user.id}</small></span><em>{user.role}</em><i>{user.status}</i><button className="button button-secondary button-small" onClick={() => setManagedUser(user)}>管理账户</button></div>)}
+          </div>
+        </Card>
+        {managedUser ? (
+          <div className="modal-backdrop" role="presentation" onMouseDown={() => setManagedUser(null)}>
+            <form className="modal modal-compact" onSubmit={saveManagedUser} onMouseDown={(event) => event.stopPropagation()}>
+              <button type="button" className="icon-button modal-close" onClick={() => setManagedUser(null)} aria-label="关闭"><X size={20} /></button>
+              <span className="eyebrow">账号管理 · {managedUser.id}</span><h2>{managedUser.name}</h2><p>{managedUser.phone}</p>
+              <label className="stacked-label">角色<select name="role" defaultValue={managedUser.role.includes("管理员") ? "管理员" : managedUser.role.includes("教练") ? "教练" : "会员"}><option>会员</option><option>教练</option><option>管理员</option></select></label>
+              <label className="stacked-label">账户状态<select name="status" defaultValue={managedUser.status}><option>正常</option><option>已停用</option></select></label>
+              <button className="button button-primary full" type="submit"><Settings size={17} /> 保存账户设置</button>
+            </form>
+          </div>
+        ) : null}
+        {accountOpen ? (
+          <div className="modal-backdrop" role="presentation" onMouseDown={() => setAccountOpen(false)}>
+            <form className="modal modal-compact" onSubmit={addAccount} onMouseDown={(event) => event.stopPropagation()}>
+              <button type="button" className="icon-button modal-close" onClick={() => setAccountOpen(false)} aria-label="关闭"><X size={20} /></button>
+              <span className="eyebrow">账号与权限</span><h2>新增平台账号</h2>
+              <label className="stacked-label">姓名<input name="name" required maxLength={30} /></label>
+              <label className="stacked-label">手机号<input name="phone" inputMode="numeric" pattern="1[0-9]{10}" required /></label>
+              <label className="stacked-label">角色<select name="role"><option>会员</option><option>教练</option><option>管理员</option></select></label>
+              <button className="button button-primary full" type="submit">创建账号</button>
+            </form>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="view-stack management-view">
-      <section className="welcome-row"><div><span className="eyebrow">管理后台</span><h1>系统运营总览</h1><p>武汉站 · 数据更新时间：刚刚</p></div><div className="inline-actions"><button className="button button-secondary" onClick={exportData}><FileDown size={17} /> 导出数据</button><button className="button button-primary" onClick={() => setAccountOpen(true)}><Plus size={17} /> 新增账号</button></div></section>
+      <section className="welcome-row"><div><span className="eyebrow">管理后台</span><h1>系统运营总览</h1><p>鄂州站 · 数据更新时间：刚刚</p></div><div className="inline-actions"><button className="button button-secondary" onClick={exportData}><FileDown size={17} /> 导出数据</button><button className="button button-primary" onClick={() => setAccountOpen(true)}><Plus size={17} /> 新增账号</button></div></section>
       <div className="stats-grid five">
         <StatCard icon={UsersRound} label="活跃会员" value="128" note="月活 96%" />
         <StatCard icon={Dumbbell} label="本月训练" value="486" note="较上月 +12%" accent="amber" />
-        <StatCard icon={CalendarDays} label="课程预约" value="322" note="履约率 92%" />
+        <StatCard icon={CalendarDays} label="课程排期" value="322" note="履约率 92%" />
         <StatCard icon={Bot} label="Hermes 调用" value="1,286" note="成功率 99.4%" accent="slate" />
         <StatCard icon={CircleDollarSign} label="本月收入" value="¥128,620" note="较上月 +13%" />
       </div>
       <div className="admin-grid">
         <Card className="span-2">
           <SectionTitle title="平台运行状态" />
-          <div className="service-grid"><Service icon={Cloud} name="网站服务" detail="武汉节点运行正常" /><Service icon={Database} name="业务数据库" detail="PostgreSQL 持久化正常" /><Service icon={Bot} name="DeepSeek / Hermes" detail="DeepSeek V4 Flash 已接入" /><Service icon={MessageCircleMore} name="企业微信 AI Bot" detail="官方长连接通道 · 等待扫码" warning /></div>
+          <div className="service-grid"><Service icon={Cloud} name="网站服务" detail="鄂州业务站运行正常" /><Service icon={Database} name="业务数据库" detail="PostgreSQL 持久化正常" /><Service icon={Bot} name="DeepSeek / Hermes" detail="DeepSeek V4 Flash 已接入" /><Service icon={MessageCircleMore} name="企业微信 AI Bot" detail="官方长连接通道 · 已配置" /></div>
         </Card>
         <Card>
           <SectionTitle title="安全与合规" />
@@ -224,7 +341,7 @@ export function AdminView() {
         <Card className="span-2">
           <SectionTitle title="用户与角色" action={<label className="search-input"><Search size={16} /><input placeholder="搜索姓名、手机号或角色" value={search} onChange={(event) => setSearch(event.target.value)} /></label>} />
           <div className="admin-users">
-            {users.map((user) => <div key={user[0]}><Avatar name={user[0]} /><span><b>{user[0]}</b><small>{user[2]}</small></span><em>{user[1]}</em><i>{user[3]}</i><button className="text-button" onClick={() => notify(`已打开 ${user[0]} 的账号管理`, "info")}>管理</button></div>)}
+            {visibleUsers.slice(0, 4).map((user) => <div key={user.id}><Avatar name={user.name} /><span><b>{user.name}</b><small>{user.phone}</small></span><em>{user.role}</em><i>{user.status}</i><button className="text-button" onClick={() => setManagedUser(user)}>管理</button></div>)}
           </div>
         </Card>
         <Card>
@@ -245,6 +362,17 @@ export function AdminView() {
             <label className="stacked-label">手机号<input name="phone" inputMode="numeric" pattern="1[0-9]{10}" required /></label>
             <label className="stacked-label">角色<select name="role"><option>会员</option><option>教练</option><option>管理员</option></select></label>
             <button className="button button-primary full" type="submit">创建账号</button>
+          </form>
+        </div>
+      ) : null}
+      {managedUser ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setManagedUser(null)}>
+          <form className="modal modal-compact" onSubmit={saveManagedUser} onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="icon-button modal-close" onClick={() => setManagedUser(null)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">账号管理 · {managedUser.id}</span><h2>{managedUser.name}</h2>
+            <label className="stacked-label">角色<select name="role" defaultValue={managedUser.role.includes("管理员") ? "管理员" : managedUser.role.includes("教练") ? "教练" : "会员"}><option>会员</option><option>教练</option><option>管理员</option></select></label>
+            <label className="stacked-label">账户状态<select name="status" defaultValue={managedUser.status}><option>正常</option><option>已停用</option></select></label>
+            <button className="button button-primary full" type="submit">保存账户设置</button>
           </form>
         </div>
       ) : null}

@@ -34,7 +34,6 @@ import { CoachWorkspace, type CoachSection } from "./coach-workspace";
 import {
   BenefitsView,
   BodyView,
-  BookingView,
   CheckinsView,
   DashboardView,
   NutritionView,
@@ -50,7 +49,6 @@ const memberNav = [
   { view: "nutrition", label: "饮食管理", icon: Apple, href: "/nutrition" },
   { view: "checkins", label: "打卡记录", icon: CalendarCheck, href: "/checkins" },
   { view: "body", label: "身体数据", icon: Scale, href: "/body" },
-  { view: "booking", label: "课程预约", icon: CalendarDays, href: "/booking" },
   { view: "benefits", label: "会员权益", icon: Trophy, href: "/benefits" },
 ] as const;
 
@@ -68,9 +66,10 @@ const adminNav = [
   { view: "admin", label: "系统总览", icon: LayoutDashboard, href: "/admin" },
   { view: "coach", label: "教练运营", icon: UsersRound, href: "/coach" },
   { view: "assistant", label: "AI 建议管理", icon: Sparkles, href: "/assistant" },
-  { view: "booking", label: "课程排期", icon: CalendarDays, href: "/booking" },
-  { view: "admin", label: "消息通知", icon: MessageCircleMore, href: "/admin" },
-  { view: "admin", label: "系统设置", icon: Settings, href: "/admin" },
+  { view: "coach-schedule", label: "课程排期", icon: CalendarDays, href: "/coach/schedule" },
+  { view: "admin-notifications", label: "消息通知", icon: MessageCircleMore, href: "/admin/notifications" },
+  { view: "admin-users", label: "用户与角色", icon: UserRound, href: "/admin/users" },
+  { view: "admin-settings", label: "系统设置", icon: Settings, href: "/admin/settings" },
 ] as const;
 
 export function FitnessPortal({ initialView }: { initialView: PortalView }) {
@@ -83,13 +82,13 @@ export function FitnessPortal({ initialView }: { initialView: PortalView }) {
 
 function PortalShell({ initialView }: { initialView: PortalView }) {
   const { state, loading, toasts, refresh, notify } = usePortal();
-  const initialRole: Role = initialView === "admin" ? "admin" : initialView.startsWith("coach") || initialView === "assistant" ? "coach" : "member";
+  const initialRole: Role = initialView.startsWith("admin") ? "admin" : initialView.startsWith("coach") || initialView === "assistant" ? "coach" : "member";
   const [role, setRole] = useState<Role>(initialRole);
   const [authorizedRole, setAuthorizedRole] = useState<Role | null>(null);
   const [view, setView] = useState<PortalView>(initialView);
-  const [activeNavLabel, setActiveNavLabel] = useState(
-    initialView === "admin"
-      ? "系统总览"
+  const [activeNavLabel, setActiveNavLabel] = useState<string>(
+    initialView.startsWith("admin")
+      ? adminNav.find((item) => item.view === initialView)?.label ?? "系统总览"
       : initialView === "assistant"
         ? "Hermes 助理"
         : coachNav.find((item) => item.view === initialView)?.label
@@ -139,9 +138,11 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
             if (!window.location.pathname.startsWith("/coach") && window.location.pathname !== "/assistant") window.history.replaceState({}, "", "/coach");
           }
           if (authenticatedRole === "admin") {
-            setView("admin");
-            setActiveNavLabel("系统总览");
-            if (window.location.pathname !== "/admin") window.history.replaceState({}, "", "/admin");
+            const currentAdminItem = adminNav.find((item) => item.href === window.location.pathname);
+            const nextAdminView = currentAdminItem?.view ?? "admin";
+            setView(nextAdminView);
+            setActiveNavLabel(currentAdminItem?.label ?? "系统总览");
+            if (!currentAdminItem) window.history.replaceState({}, "", "/admin");
           }
           setAuthStatus("authenticated");
           void refresh();
@@ -227,7 +228,6 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
       case "nutrition": return <NutritionView />;
       case "checkins": return <CheckinsView />;
       case "body": return <BodyView />;
-      case "booking": return <BookingView />;
       case "assistant": return role === "member" ? <DashboardView goTo={goTo} /> : <AssistantView selectedMemberId={selectedCoachMember} onSelectMember={selectCoachMember} />;
       case "benefits": return <BenefitsView />;
       case "coach":
@@ -246,7 +246,10 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
         };
         return <CoachWorkspace section={coachSectionMap[view] ?? "overview"} selectedMemberId={selectedCoachMember} onSelectMember={selectCoachMember} goTo={goTo} openAssistant={() => goTo("assistant", "/assistant", "Hermes 助理")} />;
       }
-      case "admin": return <AdminView />;
+      case "admin": return <AdminView section="overview" />;
+      case "admin-notifications": return <AdminView section="notifications" />;
+      case "admin-users": return <AdminView section="users" />;
+      case "admin-settings": return <AdminView section="settings" />;
       default: return <DashboardView goTo={goTo} />;
     }
   })();
@@ -269,7 +272,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
             <button className={`icon-button notification-button ${notificationOpen ? "active" : ""}`} onClick={() => { setNotificationOpen((open) => !open); setProfileOpen(false); }} aria-label="通知" aria-expanded={notificationOpen}><Bell size={20} /><i>5</i></button>
             {notificationOpen ? <div className="notification-popover">
               <div className="row-between"><b>消息通知</b><button className="text-button" onClick={() => notify("全部通知已标为已读")}>全部已读</button></div>
-              <button onClick={() => { setNotificationOpen(false); goTo(management ? "coach-schedule" : "booking", management ? "/coach/schedule" : "/booking", management ? "课程排期" : "课程预约"); }}><CalendarDays size={18} /><span><b>私教预约待确认</b><small>明天 14:00 一对一私教等待确认</small></span><em>刚刚</em></button>
+              <button onClick={() => { setNotificationOpen(false); goTo(management ? "coach-schedule" : "dashboard", management ? "/coach/schedule" : "/", management ? "课程排期" : "首页"); }}><CalendarDays size={18} /><span><b>{management ? "私教排期待确认" : "私教安排已更新"}</b><small>明天 14:00 一对一私教</small></span><em>刚刚</em></button>
               {management ? <button onClick={() => { setNotificationOpen(false); goTo("assistant", "/assistant", "Hermes 助理"); }}><Sparkles size={18} /><span><b>Hermes 建议待处理</b><small>李明减脂专项建议已生成</small></span><em>8 分钟</em></button> : <button onClick={() => { setNotificationOpen(false); goTo("nutrition", "/nutrition"); }}><Apple size={18} /><span><b>今日饮食待记录</b><small>晚餐与饮水目标尚未完成</small></span><em>8 分钟</em></button>}
               <button onClick={() => { setNotificationOpen(false); goTo("body", "/body"); }}><Activity size={18} /><span><b>身体数据已更新</b><small>最新体重 67.9 kg</small></span><em>今天</em></button>
             </div> : null}
@@ -294,14 +297,14 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
           <nav aria-label="管理导航">
             {navigation.map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-${index}`} href={href} className={activeNavLabel === label ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href, label); }}><Icon size={18} />{label}{label.includes("AI") ? <em>8</em> : null}</a>)}
           </nav>
-          <div className="sidebar-profile"><Avatar name="邵教练" size="lg" /><div><b>邵教练</b><small>私人健身教练 · 武汉</small></div>{role === "coach" ? <button className="button button-primary full" onClick={() => goTo("assistant", "/assistant", "Hermes 助理")}>Hermes 工作台</button> : null}</div>
+          <div className="sidebar-profile"><Avatar name="邵教练" size="lg" /><div><b>邵教练</b><small>私人健身教练 · 鄂州</small></div>{role === "coach" ? <button className="button button-primary full" onClick={() => goTo("assistant", "/assistant", "Hermes 助理")}>Hermes 工作台</button> : null}</div>
         </aside>
       ) : null}
 
       <main className="portal-main">
         {loading ? <div className="sync-indicator"><span /> 正在同步会员数据</div> : null}
         {viewContent}
-        <footer className="site-footer"><span>© 2026 邵教练专属会员平台 · 武汉</span><span>训练与营养建议不替代医疗诊断 · <a href="/privacy">隐私政策</a> · <a href="/terms">用户协议</a></span></footer>
+        <footer className="site-footer"><span>© 2026 邵教练专属会员平台 · 鄂州</span><span>训练与营养建议不替代医疗诊断 · <a href="/privacy">隐私政策</a> · <a href="/terms">用户协议</a></span></footer>
       </main>
 
       <nav className="mobile-bottom-nav" aria-label="移动端导航">
@@ -371,9 +374,9 @@ function LoginScreen({ onSuccess }: { onSuccess: (role: Role) => void }) {
   return (
     <main className="login-page">
       <section className="login-brand-panel">
-        <div className="brand login-brand"><span className="brand-mark"><Activity size={25} /></span><span><b>邵教练专属会员平台</b><small>武汉 · 一对一科学训练</small></span></div>
+        <div className="brand login-brand"><span className="brand-mark"><Activity size={25} /></span><span><b>邵教练专属会员平台</b><small>鄂州 · 一对一科学训练</small></span></div>
         <div><span className="eyebrow light">专属训练 · 长期主义</span><h1>把每一次训练，变成看得见的进步。</h1><p>一对一训练安排、饮食执行与身体趋势，清晰记录在你的专属会员空间。</p></div>
-        <div className="login-trust"><span><ShieldCheck size={18} /> 分角色数据访问</span><span><LockKeyhole size={18} /> 密码安全加密存储</span><span><CalendarCheck size={18} /> 一对一私教预约</span></div>
+        <div className="login-trust"><span><ShieldCheck size={18} /> 分角色数据访问</span><span><LockKeyhole size={18} /> 密码安全加密存储</span><span><CalendarCheck size={18} /> 教练统一课程排期</span></div>
       </section>
       <section className="login-form-panel">
         <form className="login-form" onSubmit={submit} key={mode}>
@@ -394,7 +397,7 @@ function LoginScreen({ onSuccess }: { onSuccess: (role: Role) => void }) {
           <button className="login-mode-link" type="button" onClick={() => switchMode(registering ? "login" : "register")}>{registering ? "已有账号？返回登录" : "还没有账号？立即注册"}</button>
           <small>{registering ? "仅开放会员注册；教练与管理员账号由系统管理员创建。" : "忘记密码请联系邵教练重置。为保护隐私，请勿共享账号。"}</small>
         </form>
-        <footer>© 2026 邵教练专属会员平台 · 武汉</footer>
+        <footer>© 2026 邵教练专属会员平台 · 鄂州</footer>
       </section>
     </main>
   );

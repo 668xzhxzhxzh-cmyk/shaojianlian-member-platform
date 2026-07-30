@@ -8,8 +8,6 @@ import {
   BadgeCheck,
   CalendarCheck,
   Check,
-  ChevronLeft,
-  ChevronRight,
   CircleDot,
   Clock3,
   Droplets,
@@ -41,6 +39,7 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
   const mealCalories = state.meals
     .filter((meal) => meal.completed)
     .reduce((sum, meal) => sum + meal.calories, 0);
+  const scheduledBookings = state.bookings.filter((booking) => !["可预约", "已取消"].includes(booking.status));
 
   return (
     <div className="view-stack">
@@ -64,13 +63,12 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
 
       <div className="dashboard-main-grid">
         <Card className="schedule-card span-2">
-          <SectionTitle title="本周安排" action={<button className="text-button" onClick={() => goTo("booking")}>查看课表 <ArrowRight size={15} /></button>} />
+          <SectionTitle title="本周私教安排" action={<span className="pill">由教练统一排期</span>} />
           <div className="mini-week">
-            {state.bookings.map((booking, index) => (
-              <button
+            {scheduledBookings.map((booking, index) => (
+              <div
                 key={booking.id}
                 className={`mini-day ${booking.status === "已预约" ? "is-current" : ""}`}
-                onClick={() => goTo("booking")}
               >
                 <span>{booking.day}</span>
                 <b>{booking.date}</b>
@@ -78,8 +76,9 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
                 <small>{booking.time}</small>
                 <em className={`status status-${booking.status}`}>{booking.status}</em>
                 {index === 2 ? <span className="today-dot" /> : null}
-              </button>
+              </div>
             ))}
+            {!scheduledBookings.length ? <div className="empty-hint">邵教练暂未发布新的课程排期。</div> : null}
           </div>
         </Card>
 
@@ -448,136 +447,14 @@ export function BodyView() {
   );
 }
 
-export function BookingView() {
-  const { state, updateBooking, notify } = usePortal();
-  const [mode, setMode] = useState<"week" | "month">("week");
-  const [activeDay, setActiveDay] = useState(2);
-  const hours = Array.from({ length: 13 }, (_, index) => `${String(index + 8).padStart(2, "0")}:00`);
-  const monthCounts: Record<string, number> = {
-    "7/1": 2, "7/3": 3, "7/5": 1, "7/7": 2, "7/9": 4, "7/10": 2,
-    "7/12": 2, "7/14": 3, "7/16": 2, "7/18": 4, "7/20": 1, "7/22": 3,
-    "7/24": 2, "7/25": 1, "7/27": 2, "7/28": 3, "7/29": 2, "7/30": 2,
-    "7/31": 3, "8/1": 2, "8/2": 1,
-  };
-  const monthCells = Array.from({ length: 35 }, (_, index) => {
-    if (index < 2) return null;
-    const sequence = index - 1;
-    return sequence <= 31 ? { key: `7/${sequence}`, day: sequence, nextMonth: false } : { key: `8/${sequence - 31}`, day: sequence - 31, nextMonth: true };
-  });
-
-  function reserveNext() {
-    const available = state.bookings.find((booking) => booking.status === "可预约");
-    if (!available) return notify("本周没有可预约的私教时段", "info");
-    setActiveDay(state.bookings.findIndex((booking) => booking.id === available.id));
-    setMode("week");
-    updateBooking(available.id);
-  }
-
-  function handleSession(booking: (typeof state.bookings)[number]) {
-    if (booking.status === "可预约" || booking.status === "已预约") {
-      updateBooking(booking.id);
-      return;
-    }
-    notify(`${booking.date} ${booking.time} · ${booking.status}`, "info");
-  }
-
-  return (
-    <div className="view-stack">
-      <div className="page-intro-row">
-        <PageIntro eyebrow="一对一私教预约" title="选择适合你的训练时间" text="完整查看邵教练可约时段；所有课程均为一对一私教，不设团体课。" />
-        <button className="button button-primary" onClick={reserveNext}><Plus size={17} /> 预约最近时段</button>
-      </div>
-      <div className="booking-layout">
-        <Card className="span-3 booking-calendar-card">
-          <div className="booking-toolbar booking-toolbar-new">
-            <div className="segmented"><button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}>周视图</button><button className={mode === "month" ? "active" : ""} onClick={() => setMode("month")}>月视图</button></div>
-            <div className="period-switcher">
-              <button className="icon-button" aria-label="上一周" onClick={() => notify("已是当前可预约周期", "info")}><ChevronLeft size={17} /></button>
-              <strong>{mode === "week" ? "2026 年 7 月 27 日 — 8 月 2 日" : "2026 年 7 月"}</strong>
-              <button className="icon-button" aria-label="下一周" onClick={() => notify("下一周期将在教练开放后显示", "info")}><ChevronRight size={17} /></button>
-            </div>
-            <span className="private-only"><UserRoundCheck size={15} /> 仅一对一私教</span>
-          </div>
-          {mode === "week" ? (
-            <>
-              <div className="booking-grid-scroll">
-                <div className="booking-time-grid" aria-label="一对一私教周课表">
-                  <div className="booking-grid-corner">时间</div>
-                  {state.bookings.map((booking, index) => <button key={`head-${booking.id}`} className={activeDay === index ? "active" : ""} onClick={() => setActiveDay(index)}><span>{booking.day}</span><b>{booking.date}</b>{index === 2 ? <em>今天</em> : null}</button>)}
-                  {hours.map((hour) => (
-                    <div className="booking-grid-row" key={hour}>
-                      <time>{hour}</time>
-                      {state.bookings.map((booking) => {
-                        const session = booking.time.startsWith(hour);
-                        return <div className={`booking-grid-cell ${session ? "has-session" : ""}`} key={`${booking.id}-${hour}`}>{session ? <button className={`private-session status-${booking.status}`} onClick={() => handleSession(booking)}><span>{booking.time}</span><b>一对一私教</b><small>{booking.coach}</small><em>{booking.status}</em></button> : null}</div>;
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="booking-mobile-agenda">
-                <div className="booking-day-strip">
-                  {state.bookings.map((booking, index) => <button key={`mobile-${booking.id}`} className={activeDay === index ? "active" : ""} onClick={() => setActiveDay(index)}><span>{booking.day.replace("周", "")}</span><b>{booking.date.split("/")[1]}</b>{index === 2 ? <i /> : null}</button>)}
-                </div>
-                <div className="mobile-agenda-list">
-                  {hours.map((hour) => {
-                    const booking = state.bookings[activeDay];
-                    const session = booking.time.startsWith(hour);
-                    return <div key={`agenda-${hour}`} className={session ? "has-session" : ""}><time>{hour}</time>{session ? <button className={`private-session status-${booking.status}`} onClick={() => handleSession(booking)}><span>{booking.time}</span><b>一对一私教 · {booking.coach}</b><em>{booking.status}{booking.status === "可预约" ? " · 点击预约" : booking.status === "已预约" ? " · 点击取消" : ""}</em></button> : <span>暂无开放时段</span>}</div>;
-                  })}
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="booking-month-head">{weeklyDays.map((day) => <span key={day}>周{day}</span>)}</div>
-              <div className="booking-month booking-month-new" aria-label="2026 年 7 月私教课月历">
-                {monthCells.map((cell, index) => {
-                  if (!cell) return <div className="month-empty" key={`empty-${index}`} />;
-                  const count = monthCounts[cell.key] ?? 0;
-                  const booking = state.bookings.find((item) => item.date === cell.key);
-                  return <button key={cell.key} className={`${count ? "has-class" : ""} ${cell.nextMonth ? "next-month" : ""}`} onClick={() => {
-                    if (booking) {
-                      setActiveDay(state.bookings.findIndex((item) => item.id === booking.id));
-                      setMode("week");
-                    } else {
-                      notify(count ? `${cell.key} 共 ${count} 节一对一私教` : `${cell.key} 暂无开放私教时段`, "info");
-                    }
-                  }}><span>{cell.day}</span>{count ? <b>{count} 节私教</b> : <small>暂无排期</small>}{booking ? <em className={`status status-${booking.status}`}>{booking.time.split("–")[0]} · {booking.status}</em> : null}</button>;
-                })}
-              </div>
-            </>
-          )}
-          <div className="calendar-legend"><span><i className="legend-done" /> 已完成</span><span><i className="legend-booked" /> 已预约</span><span><i className="legend-open" /> 可预约</span><span><i className="legend-wait" /> 待确认</span></div>
-        </Card>
-        <div className="side-stack">
-          <Card className="coach-availability">
-            <div className="coach-hero"><Avatar name="邵教练" size="lg" /><div><span className="eyebrow">本周安排</span><h3>邵教练</h3></div></div>
-            <div className="availability"><strong>3</strong><ProgressBar value={43} /><span>本周剩余可约时段</span></div>
-            <button className="button button-secondary full" onClick={() => setMode("month")}><CalendarCheck size={17} /> 查看月度排期</button>
-          </Card>
-          <Card>
-            <SectionTitle title="我的上课统计" />
-            <div className="number-grid"><div><span>本周已上课</span><b>2 节</b></div><div><span>本周已预约</span><b>2 节</b></div><div><span>本月累计</span><b>9 节</b></div><div><span>剩余课时</span><b>15 节</b></div></div>
-          </Card>
-          <Card>
-            <SectionTitle title="预约规则" />
-            <ul className="plain-list"><li>私教课至少提前 12 小时预约</li><li>待确认课程将在 2 小时内处理</li><li>取消预约请提前至少 12 小时</li><li>爽约将影响后续优先预约资格</li></ul>
-          </Card>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function BenefitsView() {
   const { notify } = usePortal();
   const benefits = [
     { icon: UserRoundCheck, title: "一对一专属指导", text: "邵教练根据你的训练反馈与身体变化实时调整方案。" },
-    { icon: CalendarCheck, title: "优先预约特权", text: "一对一私教时段优先锁定，重要周期提前开放。" },
+    { icon: CalendarCheck, title: "优先排期权益", text: "一对一私教时段由邵教练优先安排，重要周期提前锁定。" },
     { icon: Activity, title: "完整身体评估", text: "周期性体态、体成分与运动表现评估，趋势持续可追踪。" },
     { icon: HeartPulse, title: "教练周期复盘", text: "训练、饮食与恢复由邵教练统一复盘并给出下一阶段安排。" },
-    { icon: Apple, title: "个性化饮食方案", text: "按目标、口味与武汉本地饮食习惯制定可执行方案。" },
+    { icon: Apple, title: "个性化饮食方案", text: "按目标、口味与鄂州本地饮食习惯制定可执行方案。" },
     { icon: BadgeCheck, title: "隐私与数据保护", text: "数据最小化采集、分角色访问，并提供导出和注销流程。" },
   ];
   return (

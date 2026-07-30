@@ -5,7 +5,6 @@ import {
   Activity,
   ArrowUp,
   Bot,
-  Check,
   ChevronDown,
   ClipboardCheck,
   Dumbbell,
@@ -26,12 +25,12 @@ import { Avatar, Card, SectionTitle, TrendChart } from "./ui";
 type ChatMessage = { role: "coach" | "assistant"; content: string; time: string };
 
 const quickPrompts = [
-  "分析最近训练表现",
-  "评估身体恢复变化",
-  "给出饮食优化建议",
-  "生成本周训练目标",
-  "检查高风险会员",
-  "安排睡眠恢复提醒",
+  "查看当前会员完整档案",
+  "为当前会员增加一节私教课",
+  "删除当前会员指定课程",
+  "调整当前会员训练方案",
+  "调整当前会员饮食方案",
+  "新增本周身体反馈",
 ];
 
 export function AssistantView({
@@ -41,7 +40,7 @@ export function AssistantView({
   selectedMemberId?: string;
   onSelectMember?: (memberId: string) => void;
 }) {
-  const { state, notify, updateSuggestion } = usePortal();
+  const { state, notify, updateSuggestion, refresh } = usePortal();
   const [localMemberId, setLocalMemberId] = useState(selectedMemberId ?? state.profile.id);
   const [memberOptions, setMemberOptions] = useState(memberRows);
   const activeMemberId = selectedMemberId ?? localMemberId;
@@ -51,7 +50,7 @@ export function AssistantView({
     name: state.profile.name,
   };
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "你好，邵教练。我是 Hermes。请选择会员并用 member_id 发起分析，我会结合该会员的训练、饮食、恢复和身体记录整理建议草稿。", time: now() },
+    { role: "assistant", content: "你好，邵教练。我是 Hermes。请选择准确的 member_id。除分析数据外，我可以直接增删课程、调整会员档案、训练方案、饮食方案与身体反馈，执行后网站会自动同步。", time: now() },
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -118,6 +117,8 @@ export function AssistantView({
         text += decoder.decode(value, { stream: true });
         setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: text } : item));
       }
+      await refresh(selectedProfile.id);
+      notify("Hermes 操作已完成，会员页面已自动同步");
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
         setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: "Hermes 当前处于演示模式。请在生产服务器启动原生 Hermes API 后即可获得实时个性化回答；其他业务功能不受影响。" } : item));
@@ -157,15 +158,8 @@ export function AssistantView({
       <section className="page-intro assistant-intro">
         <span className="eyebrow">Hermes Agent · DeepSeek</span>
         <h1>智能助理工作台</h1>
-        <p>让 Hermes 整理数据、生成建议，最终由教练确认后触达会员。</p>
+        <p>通过精确 member_id 让 Hermes 分析并直接管理课程、档案、训练、饮食和身体反馈。</p>
       </section>
-      <div className="assistant-flow" aria-label="建议工作流">
-        <span className="done"><Check size={16} /> 沟通分析<small>明确目标</small></span>
-        <i />
-        <span className="done"><Check size={16} /> 生成建议<small>结合会员数据</small></span>
-        <i />
-        <span className="active">3 教练确认并发送<small>企业微信客户联系任务</small></span>
-      </div>
 
       <div className="assistant-grid">
         <Card className="chat-panel">
@@ -225,7 +219,7 @@ export function AssistantView({
             <MiniTrend title="体脂率（%）" data={chartData} dataKey="bodyFat" />
           </Card>
           <Card className="agent-status">
-            <Bot size={24} /><div><b>Hermes 服务正常</b><span>DeepSeek 模型 · 武汉时区</span></div><i />
+            <Bot size={24} /><div><b>Hermes 服务正常</b><span>DeepSeek 模型 · 鄂州服务区</span></div><i />
           </Card>
         </div>
       </div>
