@@ -74,7 +74,7 @@ Hermes `/var/lib/hermes/.hermes/.env`：
 - AI Bot 需要 `Bot ID` 与 `Secret`，不需要公网回调地址、EncodingAESKey、普通群 Webhook 或独立服务进程。
 - 私聊按教练 userid 白名单放行。
 - 群聊同时按授权群 chatid 与教练 userid 放行。
-- 企业微信适配器在系统上下文中提供真实发送者 userid，Hermes 调用工具时必须原样使用。
+- 企业微信适配器先按真实发送者 userid 白名单拦截；会员工具再在服务器端绑定唯一授权教练 userid，聊天正文和模型都不能指定或替换身份。
 
 部署工具：
 
@@ -88,6 +88,23 @@ sudo sh scripts/install-hermes-wecom-tools.sh /opt/shao-coach
 sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes mcp test shao-coach
 sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes tools --summary
 ```
+
+## 企业微信客户联系凭据
+
+管理员在企业微信后台完成以下一次性配置：
+
+1. 在“客户联系”中确认教练已加入使用范围。
+2. 创建一个仅作为 API 凭据的自建应用，可见范围只包含授权教练。
+3. 在“客户联系 → API → 可调用应用”中加入该自建应用，并把服务器公网 IP 加入企业可信 IP。
+4. 从“我的企业 → 企业信息”取得 CorpID，从自建应用详情取得 Secret。
+
+不要把 Secret 发到群聊、工单或提交到 GitHub。在服务器交互式终端执行下面的命令，并按提示输入；Secret 不会回显：
+
+```bash
+sudo /usr/local/sbin/shao-wecom-contact-config
+```
+
+脚本会原子更新生产 `.env`、保留原文件权限并重启 API。随后应由部署人员调用企业微信官方接口验证凭据、应用权限和可信 IP，而不能只以“已配置”代替真实验证。
 
 ## 教练操作流程
 
