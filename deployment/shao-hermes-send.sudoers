@@ -1,1 +1,0 @@
-shaoapp ALL=(hermes) NOPASSWD: /usr/local/bin/shao-hermes-send *

@@ -1,0 +1,25 @@
+# 合并到 /var/lib/hermes/.hermes/config.yaml。
+# 真实令牌只放 /var/lib/hermes/.hermes/.env，不要写入本文件。
+mcp_servers:
+  shao-coach:
+    command: /var/lib/hermes/.hermes/hermes-agent/venv/bin/python
+    args:
+      - /var/lib/hermes/.hermes/tools/shao_coach_mcp.py
+    env:
+      SHAO_INTERNAL_API_URL: http://127.0.0.1:8788/api/internal/hermes/tools
+      SHAO_HERMES_TOOL_TOKEN: ${env:HERMES_TOOL_TOKEN}
+      WECOM_ALLOWED_COACH_USERIDS: ${env:WECOM_ALLOWED_USERS}
+    enabled: true
+    tools:
+      include:
+        - get_member_by_id
+        - list_customer_ids
+        - bind_member_external_userid
+        - create_member_message_draft
+        - confirm_customer_send_task
+        - get_customer_send_task_status
+
+# MCP 只对企业微信 AI Bot 开放。网站 API、CLI 和其他平台不加载会员管理工具。
+platform_toolsets:
+  wecom:
+    - shao-coach

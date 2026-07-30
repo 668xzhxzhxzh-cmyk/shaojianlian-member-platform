@@ -110,20 +110,9 @@ export function AssistantView() {
     notify("已准备重新生成指令，确认后发送给 Hermes", "info");
   }
 
-  async function confirmAndSend() {
-    updateSuggestion(suggestion.id, "已发送");
-    try {
-      const response = await fetch("/api/notifications/weixin", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ member: suggestion.member, title: suggestion.title, content: suggestion.content }),
-      });
-      const result = await response.json() as { sent?: boolean; channel?: string; queued?: boolean };
-      if (result.sent) notify("Hermes 已通过微信机器人发送");
-      else notify("建议已确认；微信扫码并建立会话后会自动推送", "info");
-    } catch {
-      notify("建议已确认并进入待推送队列", "info");
-    }
+  function confirmAndSend() {
+    updateSuggestion(suggestion.id, "待确认");
+    notify(`草稿已保存。请在企业微信“AI健身助理”中使用 member_id=${state.profile.id} 确认发送。`, "info");
   }
 
   return (
@@ -138,7 +127,7 @@ export function AssistantView() {
         <i />
         <span className="done"><Check size={16} /> 生成建议<small>结合会员数据</small></span>
         <i />
-        <span className="active">3 教练确认并发送<small>微信机器人触达</small></span>
+        <span className="active">3 教练确认并发送<small>企业微信客户联系任务</small></span>
       </div>
 
       <div className="assistant-grid">
@@ -183,7 +172,7 @@ export function AssistantView() {
               <Recommendation icon={ShieldAlert} title="风险提示" text="肩部酸痛持续较多，若出现夜间痛或活动受限，应暂停相关负荷并及时咨询专业医务人员。" source="沟通记录 · 风险规则" editing={editing} onEdit={() => setEditing(true)} />
               <Recommendation icon={ClipboardCheck} title="跟进任务" text="安排一次肩部放松与动作评估；下周训练前复测恢复评分，并根据结果调整计划。" source="沟通记录" editing={editing} onEdit={() => setEditing(true)} />
             </div>
-            <div className="suggestion-actions"><button className="button button-secondary" onClick={() => { setEditing((value) => !value); if (editing) notify("修改已保存到草稿"); }}><Edit3 size={17} /> {editing ? "完成修改" : "修改建议"}</button><button className="button button-primary" onClick={confirmAndSend}><Send size={17} /> 确认并交给 Hermes 推送</button></div>
+            <div className="suggestion-actions"><button className="button button-secondary" onClick={() => { setEditing((value) => !value); if (editing) notify("修改已保存到草稿"); }}><Edit3 size={17} /> {editing ? "完成修改" : "修改建议"}</button><button className="button button-primary" onClick={confirmAndSend}><Send size={17} /> 保存并前往企业微信确认</button></div>
           </Card>
         </div>
 
