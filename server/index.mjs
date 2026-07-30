@@ -1,9 +1,9 @@
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import pg from "pg";
+import { createWecomContactService } from "./wecom-contact.mjs";
 
 const { Pool } = pg;
 const port = Number(process.env.API_PORT || 8788);
@@ -55,6 +55,7 @@ const seedState = {
 const hermesPrompt = `你是 Hermes，是邵教练专属会员平台中的智能健康助理。请用简洁中文，基于训练、饮食、睡眠和身体数据给出可执行建议。区分数据事实、合理推断和待教练确认事项；不做医疗诊断；持续疼痛、夜间痛、眩晕或胸闷应建议暂停训练并咨询合格医务人员；不要声称已经发送微信消息。`;
 
 await initializeDatabase();
+const wecomContact = createWecomContactService({ pool });
 
 const server = createServer(async (request, response) => {
   setSecurityHeaders(response);
@@ -69,9 +70,18 @@ const server = createServer(async (request, response) => {
       integrations: {
         deepseek: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
         hermes: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
-        weixin: Boolean(process.env.WEIXIN_TARGET_ID),
+        wecomContact: wecomContact.contactConfigured,
+        hermesMemberTools: wecomContact.toolsConfigured,
       },
     });
+    if (url.pathname === "/api/internal/hermes/tools" && request.method === "POST") {
+      return wecomContact.handleInternalTool(request, response).catch((error) => {
+        const status = Number(error?.statusCode || 500);
+        return json(response, status, {
+          error: status < 500 ? error.message : "Hermes 会员工具暂时不可用",
+        });
+      });
+    }
     if (url.pathname === "/api/auth/login" && request.method === "POST") return login(request, response);
     if (url.pathname === "/api/auth/register" && request.method === "POST") return register(request, response);
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
@@ -91,14 +101,6 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/users" && request.method === "POST") return createUser(request, response, session);
     if (url.pathname === "/api/actions" && request.method === "POST") return handleAction(request, response, session);
     if (url.pathname === "/api/agent/chat" && request.method === "POST") return handleHermes(request, response, session);
-    if (url.pathname === "/api/notifications/weixin" && request.method === "POST") {
-      if (!["coach", "admin"].includes(session.role)) return json(response, 403, { error: "仅教练可发送会员消息" });
-      return handleWeixin(request, response, session);
-    }
-    if (url.pathname === "/api/notifications/wecom" && request.method === "POST") {
-      if (!["coach", "admin"].includes(session.role)) return json(response, 403, { error: "仅教练可发送会员消息" });
-      return handleWecom(request, response, session);
-    }
     return json(response, 404, { error: "接口不存在" });
   } catch (error) {
     console.error(JSON.stringify({ level: "error", path: url.pathname, message: error instanceof Error ? error.message : String(error) }));
@@ -129,8 +131,32 @@ async function initializeDatabase() {
       title TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL, provider_message TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS member_wecom_bindings (
+      member_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      external_userid TEXT UNIQUE,
+      coach_userid TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS wecom_send_tasks (
+      id UUID PRIMARY KEY,
+      member_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      external_userid TEXT NOT NULL,
+      coach_userid TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft',
+      wecom_msgid TEXT,
+      provider_message TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      confirmed_at TIMESTAMPTZ,
+      provider_updated_at TIMESTAMPTZ
+    );
     CREATE INDEX IF NOT EXISTS audit_log_actor_date_idx ON audit_log(actor_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS notifications_status_date_idx ON notifications(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS member_wecom_bindings_coach_idx ON member_wecom_bindings(coach_userid, status);
+    CREATE INDEX IF NOT EXISTS wecom_send_tasks_coach_status_idx ON wecom_send_tasks(coach_userid, status, created_at DESC);
   `);
   const accounts = [
     ["member-li", process.env.MEMBER_PHONE || "13800005206", "李明", "member", process.env.MEMBER_PASSWORD || "Member@2026"],
@@ -398,90 +424,6 @@ async function handleHermes(request, response, session) {
   await audit(session.id, "hermes_chat", { messageCount: messages.length });
 }
 
-async function handleWecom(request, response, session) {
-  const body = await readJson(request);
-  const member = String(body.member || "").slice(0, 40);
-  const title = String(body.title || "").slice(0, 80);
-  const content = String(body.content || "").slice(0, 1800);
-  if (!member || !title || !content) return json(response, 400, { error: "消息内容不完整" });
-  const id = randomUUID();
-  const webhookValue = process.env.WECOM_WEBHOOK_URL;
-  if (!webhookValue) {
-    await pool.query("INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status) VALUES ($1,$2,$3,'wecom',$4,$5,'queued')", [id, session.id, member, title, content]);
-    return json(response, 202, { sent: false, configured: false, queued: true });
-  }
-  const webhook = new URL(webhookValue);
-  if (webhook.protocol !== "https:" || webhook.hostname !== "qyapi.weixin.qq.com" || webhook.pathname !== "/cgi-bin/webhook/send") return json(response, 500, { error: "企业微信 Webhook 配置无效" });
-  const upstream = await fetch(webhook, { method: "POST", headers: { "content-type": "application/json; charset=utf-8" }, body: JSON.stringify({ msgtype: "markdown", markdown: { content: `### ${escapeMarkdown(title)}\n> 会员：${escapeMarkdown(member)}\n${escapeMarkdown(content)}\n\n<font color=\"comment\">由 Hermes 整理，已由邵教练确认</font>` } }) });
-  const result = await upstream.json().catch(() => ({}));
-  const sent = upstream.ok && result.errcode === 0;
-  await pool.query("INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'wecom',$4,$5,$6,$7)", [id, session.id, member, title, content, sent ? "sent" : "failed", result.errmsg || null]);
-  return sent ? json(response, 200, { sent: true, channel: "wecom" }) : json(response, 502, { sent: false, error: result.errmsg || "企业微信发送失败" });
-}
-
-async function handleWeixin(request, response, session) {
-  const body = await readJson(request);
-  const member = String(body.member || "").slice(0, 40);
-  const title = String(body.title || "").slice(0, 80);
-  const content = String(body.content || "").slice(0, 1800);
-  if (!member || !title || !content) return json(response, 400, { error: "消息内容不完整" });
-
-  const id = randomUUID();
-  const target = process.env.WEIXIN_TARGET_ID;
-  if (!target) {
-    await pool.query(
-      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'hermes-weixin',$4,$5,'queued',$6)",
-      [id, session.id, member, title, content, "等待会员向原生 Hermes 微信机器人发送首条消息"],
-    );
-    return json(response, 202, { sent: false, configured: false, queued: true, channel: "hermes-weixin" });
-  }
-
-  const message = `【${title}】\n会员：${member}\n${content}\n\n— Hermes 整理，邵教练确认`;
-  try {
-    const result = await sendNativeHermesWeixin(target, message);
-    const sent = result.ok;
-    await pool.query(
-      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'hermes-weixin',$4,$5,$6,$7)",
-      [id, session.id, member, title, content, sent ? "sent" : "failed", sent ? "原生 Hermes 微信通道已接收" : result.message],
-    );
-    await audit(session.id, "weixin_send", { member, title, sent });
-    return sent
-      ? json(response, 200, { sent: true, channel: "hermes-weixin" })
-      : json(response, 502, { sent: false, error: result.message || "微信发送失败" });
-  } catch (error) {
-    await pool.query(
-      "INSERT INTO notifications (id,actor_id,member_name,channel,title,content,status,provider_message) VALUES ($1,$2,$3,'hermes-weixin',$4,$5,'failed',$6)",
-      [id, session.id, member, title, content, error instanceof Error ? error.message.slice(0, 300) : "Hermes 微信通道不可用"],
-    );
-    return json(response, 502, { sent: false, error: "Hermes 微信通道暂时不可用" });
-  }
-}
-
-function sendNativeHermesWeixin(target, message) {
-  const wrapper = process.env.HERMES_SEND_WRAPPER || "/usr/local/bin/shao-hermes-send";
-  return new Promise((resolve) => {
-    const child = spawn("/usr/bin/sudo", ["-n", "-H", "-u", "hermes", wrapper, target], {
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    const timeout = setTimeout(() => child.kill("SIGTERM"), 30000);
-    child.stdout.on("data", (chunk) => { stdout = (stdout + chunk.toString("utf8")).slice(-4000); });
-    child.stderr.on("data", (chunk) => { stderr = (stderr + chunk.toString("utf8")).slice(-4000); });
-    child.on("error", (error) => {
-      clearTimeout(timeout);
-      resolve({ ok: false, message: error.message.slice(0, 300) });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timeout);
-      const detail = (stderr || stdout || `Hermes 发送进程退出码 ${code}`).trim().slice(0, 300);
-      resolve({ ok: code === 0, message: detail });
-    });
-    child.stdin.end(message, "utf8");
-  });
-}
-
 async function audit(actorId, action, detail) {
   await pool.query("INSERT INTO audit_log (id,actor_id,action,detail) VALUES ($1,$2,$3,$4)", [randomUUID(), actorId, action, detail]);
 }
@@ -516,7 +458,6 @@ function json(response, status, data) {
   response.end(JSON.stringify(data));
 }
 function finish(response, status) { response.writeHead(status); response.end(); }
-function escapeMarkdown(value) { return value.replace(/[<>]/g, "").replace(/[`]/g, "ˋ"); }
 
 function shutdown() {
   server.close(async () => {

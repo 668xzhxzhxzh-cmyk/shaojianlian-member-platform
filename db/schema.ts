@@ -86,3 +86,27 @@ export const portalState = sqliteTable("portal_state", {
   stateJson: text("state_json").notNull(),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const memberWecomBindings = sqliteTable("member_wecom_bindings", {
+  memberId: text("member_id").primaryKey(),
+  externalUserid: text("external_userid").unique(),
+  coachUserid: text("coach_userid").notNull(),
+  status: text("status").notNull().default("active"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const wecomSendTasks = sqliteTable("wecom_send_tasks", {
+  id: text("id").primaryKey(),
+  memberId: text("member_id").notNull(),
+  externalUserid: text("external_userid").notNull(),
+  coachUserid: text("coach_userid").notNull(),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  status: text("status").notNull().default("draft"),
+  wecomMsgid: text("wecom_msgid"),
+  providerMessage: text("provider_message"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  confirmedAt: text("confirmed_at"),
+  providerUpdatedAt: text("provider_updated_at"),
+});

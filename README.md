@@ -1,146 +1,151 @@
 # 邵教练专属会员平台
 
-面向武汉私教业务的完整会员服务平台，包含会员端、教练端、管理端、原生 Hermes 智能体、DeepSeek API、Hermes 原生微信通道、持久化数据、账号保护与阿里云部署。
+面向武汉私教业务的完整会员服务平台。生产链路由响应式网站、PostgreSQL、一个原生 Hermes 实例、DeepSeek V4 Flash、企业微信智能机器人和企业微信客户联系官方接口组成。
 
-## 已实现功能
+## 已实现
 
-- 会员端：首页可使用中国内地手机号自助注册并自动登录；支持训练计划、训练计时、饮食与饮水记录、连续打卡、身体指标与趋势、课程预约、会员权益。
-- 教练端：会员健康概览、预约日程、恢复与风险提示、AI 建议确认、发送队列。
-- 管理端：运营指标、用户角色、服务状态、集成状态、安全与备案提示。
-- Hermes Agent：网站通过原生 Hermes API 流式对话，Hermes 使用 `deepseek-v4-flash`；注入会员近期数据；内置运动风险与医疗边界提示。
-- 消息推送：只有教练或管理员确认后才能调用 Hermes 原生 Weixin 通道；API 与 Gateway 仅监听服务器回环网络；未扫码或未建立会员会话时进入待推送队列。
-- 数据与安全：PostgreSQL、中国标准手机号注册与登录、bcrypt 密码哈希、HttpOnly/SameSite 会话、角色校验、来源校验、审计日志、备份脚本；公开注册固定为会员角色，教练与管理员账号只能由有权限的账号创建。
-- 响应式体验：桌面、平板、手机完整可用；手机底部导航、抽屉导航、触控友好表单；支持添加到主屏幕。
+- 会员端：首页使用中国内地手机号自助注册并自动登录；训练计划、训练计时、饮食饮水、连续打卡、身体指标、课程预约与会员权益。
+- 教练端：会员健康概览、预约日程、恢复风险提示、AI 建议草稿与发送任务状态。
+- 管理端：用户角色、运营指标、服务与集成状态、安全和备案提示。
+- 智能体：网站与企业微信 AI Bot 共用现有 Hermes；Hermes 使用 `deepseek-v4-flash`，不安装第二个实例。
+- 企业微信入口：教练在“AI健身助理”单聊，或在授权内部群中 `@AI健身助理`。机器人通过 Hermes 原生 WeCom WebSocket 适配器连接 `wss://openws.work.weixin.qq.com`，无需普通群 Webhook。
+- 会员工具：只允许企业微信白名单教练调用；按精确 `member_id` 查询，不按昵称、姓名或头像猜测；网站保存 `member_id`、`external_userid`、`coach_userid` 绑定。
+- 客户触达：Hermes 只创建企业微信客户联系发送任务。教练先在机器人会话确认草稿，再到企业微信客户端完成官方最终确认。
+- 状态语义：创建任务后固定提示“发送任务已创建，请在企业微信客户端确认发送。”；企业微信报告已执行发送也不会被表述为“会员已收到”。
+- 安全：PostgreSQL、bcrypt、HttpOnly/SameSite 会话、角色与来源校验、回环内部 API、独立工具令牌、企业微信 userid 白名单和审计日志。
+- 响应式：电脑、平板和手机完整可用，支持添加到主屏幕。
+
+本项目不使用 OpenClaw、ClawBot、iLink、个人微信逆向协议或普通微信群 Webhook 机器人。会员只需用普通微信添加教练企业微信，不安装机器人，也不能调用教练管理工具。
+
+## 通信架构
+
+```text
+教练企业微信：单聊 / 授权群 @“AI健身助理”
+  → 企业微信智能机器人 AI Bot（官方 WebSocket/API 模式）
+  → 现有 Hermes（唯一实例）
+  → DeepSeek V4 Flash
+  → 网站回环内部 API
+  → PostgreSQL 会员与绑定数据
+  → 企业微信客户联系 add_msg_template
+  → 教练在企业微信客户端确认发送
+  → 会员普通微信收到客户联系消息
+```
+
+企业微信客户联系凭据只是 Hermes 的工具凭据，不创建第二个聊天入口。
 
 ## 本地运行
 
 要求 Node.js 22.13 或更高版本。
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-未配置原生 Hermes 或微信通道时，界面与其他业务功能仍可运行；系统会明确提示集成未配置，不会伪造真实发送结果。
+复制 `.env.example` 为 `.env`。本地未配置 Hermes 或企业微信时，注册、登录和其他网站功能仍可运行；系统不会伪造发送成功。
 
-## 环境配置
+## 生产环境变量
 
-复制 `.env.example` 为 `.env`，至少修改：
+网站 `/opt/shao-coach/.env`：
 
-- `DEEPSEEK_API_KEY`：DeepSeek 官方 API 密钥，只写入 Hermes 的服务器环境。
-- `DEEPSEEK_MODEL`：固定使用 `deepseek-v4-flash`。
-- `HERMES_API_URL`：原生 Hermes API 的回环地址，原生部署默认 `http://127.0.0.1:8642`。
-- `HERMES_API_KEY`：原生 Hermes API 的随机强令牌。
-- `WEIXIN_TARGET_ID`：会员先与机器人建立会话后得到的微信会话目标 ID。
-- `WECOM_WEBHOOK_URL`：可选的企业微信群官方机器人兼容通道。
-- `SESSION_SECRET`：至少 32 字节随机值。
-- `POSTGRES_PASSWORD`：数据库强密码。
-- 三种角色的手机号与密码：首次生产启动前全部替换。
+- `HERMES_API_URL`、`HERMES_API_KEY`：现有 Hermes 回环 API。
+- `HERMES_TOOL_TOKEN`：网站与 Hermes MCP 共享的独立强令牌，至少 32 字节。
+- `WECOM_ALLOWED_COACH_USERIDS`：唯一或逗号分隔的授权教练企业微信 userid。
+- `WECOM_CORP_ID`：企业 ID。
+- `WECOM_CONTACT_SECRET`：被配置为“客户联系可调用接口的应用”的 Secret。
+- `SESSION_SECRET`、`DATABASE_URL`/PostgreSQL 变量及三种角色初始账号。
 
-任何真实密钥都不能提交到 GitHub。`.env` 已被忽略。
+Hermes `/var/lib/hermes/.hermes/.env`：
 
-## 阿里云 ECS 部署
+- `DEEPSEEK_API_KEY`、`API_SERVER_KEY`：保留现有值。
+- `WECOM_BOT_ID`、`WECOM_SECRET`：扫码创建“AI健身助理”后得到的 AI Bot 凭据。
+- `WECOM_DM_POLICY=allowlist`
+- `WECOM_ALLOWED_USERS=<教练userid>`
+- `WECOM_GROUP_POLICY=allowlist`
+- `HERMES_TOOL_TOKEN=<与网站相同的独立强令牌>`
 
-推荐 Alibaba Cloud Linux 3 / Ubuntu 24.04，至少 2 核 4GB。安全组仅对公网开放 `80`、`443` 和受限来源的 `22`，不要开放 PostgreSQL 端口。
+真实密钥只能保存在服务器环境文件中，不能提交到 GitHub。
+
+## 企业微信 AI Bot 配置
+
+当前生产 Hermes `v0.19.0` 已原生支持企业微信 AI Bot WebSocket/API 模式：
+
+- 入站、出站和群内回复均由 Hermes `wecom` 适配器处理。
+- AI Bot 需要 `Bot ID` 与 `Secret`，不需要公网回调地址、EncodingAESKey、普通群 Webhook 或独立服务进程。
+- 私聊按教练 userid 白名单放行。
+- 群聊同时按授权群 chatid 与教练 userid 放行。
+- 企业微信适配器在系统上下文中提供真实发送者 userid，Hermes 调用工具时必须原样使用。
+
+部署工具：
 
 ```bash
-cp .env.example .env
-# 编辑 .env，填写域名、密钥和强密码
-sh scripts/deploy-aliyun.sh
+sudo sh scripts/install-hermes-wecom-tools.sh /opt/shao-coach
 ```
 
-容器部署由四个容器组成，原生 Hermes 独立运行在宿主机：
+然后把 `deployment/hermes-wecom-mcp.example.yaml` 合并到 Hermes `config.yaml`，将 MCP 仅启用到 `wecom` 平台，并验证：
 
-- Caddy：HTTPS、HTTP/3、压缩、安全响应头与反向代理。
-- Web：响应式会员平台。
-- API：账号、业务、原生 Hermes API 代理与微信消息推送。
-- PostgreSQL：生产业务数据，不暴露公网。
+```bash
+sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes mcp test shao-coach
+sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes tools --summary
+```
 
-IP 验收阶段使用 `SITE_ADDRESS=http://公网IP`、`PUBLIC_URL=http://公网IP` 和 `COOKIE_SECURE=false`。域名备案并解析到 ECS 后，把地址改为备案域名、将 `COOKIE_SECURE` 设为 `true` 并重新运行部署脚本，Caddy 会自动申请 HTTPS 证书。
+## 教练操作流程
 
-### 中国内地轻量主机部署
+1. 教练向“AI健身助理”发送：`查询会员 member_id=...`。
+2. Hermes 用当前真实 `coach_userid` 调用精确查询工具。
+3. 如需触达会员，Hermes 生成草稿并返回 `task_id`。
+4. 教练回复：`确认发送 task_id=<task_id>`。
+5. Hermes 调用客户联系接口创建发送任务，并回复：`发送任务已创建，请在企业微信客户端确认发送。`
+6. 教练在企业微信客户端执行官方最终确认。
+7. 状态查询只显示“等待确认”“企业微信报告已执行发送”或失败原因，绝不显示无法证实的“会员已收到”。
 
-如果主机内存小于 4GB，或 Docker Hub 在境内网络超时，可采用当前生产机使用的原生方案：Node.js 22 + Nginx + PostgreSQL 16。前端使用 `npm run build:node` / `npm run start:node`，API 使用 `node server/index.mjs`；参考配置位于：
+首次绑定会员时，必须由教练明确提供 `member_id` 与企业微信官方 `external_userid`。网站会用客户详情接口验证这个 external_userid 确实属于当前教练。
+
+## 阿里云 ECS
+
+生产机采用中国内地原生部署：Node.js 22、Nginx、PostgreSQL 16 与独立 `hermes` 系统用户。现有网站、数据库、Hermes 和 DeepSeek 原地升级，不重装。
+
+主要文件：
 
 - `deployment/shao-web.service`
 - `deployment/shao-api.service`
 - `deployment/hermes-gateway.service`
-- `deployment/shao-hermes-send`
-- `deployment/shao-hermes-send.sudoers`
+- `deployment/hermes-wecom-soul.md`
+- `deployment/hermes-wecom-mcp.example.yaml`
 - `deployment/shao-backup.service`
 - `deployment/shao-backup.timer`
 - `deployment/nginx-ip.conf`
 
-生产目录固定为 `/opt/shao-coach`，`.env` 权限应为 `root:shaoapp 0640`；网站、API 和 Hermes API 均只监听 `127.0.0.1`，公网仅由 Nginx 暴露 80/443。Hermes 以独立的 `hermes` 系统用户运行，并通过 systemd 设置内存上限、自动重启与最小文件访问权限。当前 IP 验收完成后，再替换 Nginx 配置中的域名并接入 HTTPS。
+网站、API、Hermes API 和 Hermes 会员工具均只监听或调用 `127.0.0.1`，公网只开放 Nginx 80/443。服务器安全组不开放 PostgreSQL 与 Hermes 端口。
 
-### 中国内地上线前必须完成
+域名解析到 ECS 后配置 HTTPS。中国内地正式对外服务前完成 ICP 备案；网站开通后按法规办理公安联网备案，并补全真实运营主体、隐私政策、健康数据授权与退款规则。
 
-1. 中国内地服务器对外提供网站服务前需完成 ICP 备案。
-2. 网站开通之日起 30 日内按要求办理公安联网备案。
-3. 在隐私政策和用户协议中补全实际运营主体名称、地址、联系电话、退款规则与个人信息保护负责人。
-4. 真实处理健康与身体数据前，由运营主体完成个人信息处理规则、授权流程、最小必要性和供应商数据条款审查。
-5. 微信通道使用 Hermes Agent 内置的 Weixin 适配器；不要替换成非官方维护的个人微信逆向框架。
-
-参考：[阿里云 ICP 备案快速入门](https://help.aliyun.com/zh/icp-filing/basic-icp-service/getting-started/quick-start-for-icp-filing-for-personal-websites)、[阿里云 Docker 与 Compose](https://help.aliyun.com/zh/ecs/user-guide/install-and-use-docker)、[DeepSeek 对话补全文档](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)。
-
-## 微信机器人（腾讯官方通道）
-
-1. 在 ECS 为独立的 `hermes` 系统用户安装原生 Hermes Agent。
-2. 在 `/var/lib/hermes/.hermes/.env` 中配置 `DEEPSEEK_API_KEY`、`API_SERVER_KEY`、`API_SERVER_HOST=127.0.0.1`、`API_SERVER_PORT=8642` 和 Weixin 私聊策略。
-3. 将 Hermes 默认 provider 设为 `deepseek`，默认模型设为 `deepseek-v4-flash`。
-4. 以 `hermes` 用户运行 `hermes gateway setup` 并选择 Weixin，由运营者扫码授权；然后启用 `hermes-gateway.service`。
-5. 会员先向机器人发一条消息建立会话，执行 `hermes send --list weixin --json` 获取目标 ID，再写入网站 `.env` 的 `WEIXIN_TARGET_ID`。
-6. 安装 `deployment/shao-hermes-send` 到 `/usr/local/bin/`，安装对应 sudoers 规则，再由教练端发送一条测试消息。
-
-`HERMES_API_KEY` 是高敏感密钥，只能保存在服务器环境中。Hermes API 必须绑定 `127.0.0.1`，不能直接暴露公网。平台 API 仅接受 `127.0.0.1`、`localhost` 或 `host.docker.internal` 作为 Hermes API 地址。原生 Weixin 通道以私聊为主，普通微信群消息是否可达取决于微信 iLink Bot 身份能力。
-
-## 数据备份与恢复
-
-执行备份：
+## 数据备份
 
 ```bash
 sh scripts/backup-postgres.sh
 ```
 
-原生 ECS 部署安装 `shao-backup.service` 与 `shao-backup.timer` 后，会在每天凌晨 03:15（Asia/Shanghai，最多随机延迟 5 分钟）自动执行，并默认清理 14 天前的本地备份。生产环境还应将备份异地同步到阿里云 OSS。
-
-恢复前先停止写入，再执行：
-
-```bash
-gunzip -c backups/目标备份.sql.gz | docker compose exec -T postgres psql -U shao shao_platform
-```
-
-原生 PostgreSQL 部署使用：
-
-```bash
-gunzip -c backups/目标备份.sql.gz | psql "$DATABASE_URL"
-```
-
-生产环境应至少完成一次恢复演练。
+`shao-backup.timer` 每天 03:15（Asia/Shanghai）备份 PostgreSQL，默认保留 14 天。生产环境还应异地同步至阿里云 OSS，并完成恢复演练。
 
 ## 验证
 
 ```bash
+npm ci
 npx tsc --noEmit
-npm test
 npm run build:node
-docker compose config
+node --test tests/*.test.mjs
+node --check server/index.mjs
+node --check server/wecom-contact.mjs
+python -m py_compile server/hermes_tools_mcp.py
 ```
 
 ## 目录
 
-- `app/`：页面与 Cloudflare/Sites 预览 API。
-- `components/`：响应式产品界面。
-- `server/`：阿里云生产 API、账号、PostgreSQL、Hermes 与推送。
-- `db/`、`drizzle/`：Sites D1 数据结构与迁移。
-- `deployment/`：Caddy、Nginx 与 systemd 生产配置。
-- `scripts/`：部署和备份。
+- `app/`、`components/`：响应式会员、教练、管理界面。
+- `server/`：阿里云生产 API、PostgreSQL、Hermes MCP 与客户联系发送工具。
+- `db/`、`drizzle/`：Sites/D1 数据结构和迁移。
+- `deployment/`：Nginx、systemd、Hermes 配置模板。
+- `scripts/`：部署、备份和 Hermes 工具安装。
 
-## 交付说明
-
-仓库同时保留两个运行面：
-
-- Sites 私有预览：便于客户验收界面与 D1 业务流程。
-- 阿里云生产栈：面向武汉客户，数据留在中国内地 ECS/PostgreSQL，由客户域名提供 HTTPS 服务。
-
-上线时以阿里云生产栈为准。
+正式交付以阿里云生产栈为准。

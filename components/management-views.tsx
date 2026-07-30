@@ -215,7 +215,7 @@ export function AdminView() {
       <div className="admin-grid">
         <Card className="span-2">
           <SectionTitle title="平台运行状态" />
-          <div className="service-grid"><Service icon={Cloud} name="网站服务" detail="武汉节点运行正常" /><Service icon={Database} name="业务数据库" detail="PostgreSQL 持久化正常" /><Service icon={Bot} name="DeepSeek / Hermes" detail="DeepSeek V4 Flash 已接入" /><Service icon={MessageCircleMore} name="微信机器人" detail="腾讯官方通道 · 等待扫码" warning /></div>
+          <div className="service-grid"><Service icon={Cloud} name="网站服务" detail="武汉节点运行正常" /><Service icon={Database} name="业务数据库" detail="PostgreSQL 持久化正常" /><Service icon={Bot} name="DeepSeek / Hermes" detail="DeepSeek V4 Flash 已接入" /><Service icon={MessageCircleMore} name="企业微信 AI Bot" detail="官方长连接通道 · 等待扫码" warning /></div>
         </Card>
         <Card>
           <SectionTitle title="安全与合规" />
@@ -231,7 +231,7 @@ export function AdminView() {
           <SectionTitle title="集成设置" />
           <div className="integration-list">
             <button onClick={() => notify("DeepSeek 连接测试已提交")}><span><Sparkles size={20} /><b>DeepSeek API</b></span><em className="ok">已接入</em><ArrowRight size={16} /></button>
-            <button onClick={() => notify("微信通道已安装，扫码登录后即可启用", "info")}><span><MessageCircleMore size={20} /><b>微信机器人</b></span><em>待扫码</em><ArrowRight size={16} /></button>
+            <button onClick={() => notify("企业微信 AI Bot 已就绪，扫码创建后即可启用", "info")}><span><MessageCircleMore size={20} /><b>AI健身助理</b></span><em>待扫码</em><ArrowRight size={16} /></button>
             <button onClick={() => notify("备份任务状态正常；最近一次恢复演练待执行", "info")}><span><Database size={20} /><b>数据备份</b></span><em className="ok">正常</em><ArrowRight size={16} /></button>
           </div>
         </Card>

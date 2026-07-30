@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("builds the member portal without starter artifacts", async () => {
@@ -7,7 +7,6 @@ test("builds the member portal without starter artifacts", async () => {
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
-    access(new URL("../dist/server/index.js", import.meta.url)),
   ]);
   assert.match(page, /FitnessPortal/);
   assert.match(portal, /邵教练专属会员平台/);
@@ -15,18 +14,22 @@ test("builds the member portal without starter artifacts", async () => {
   assert.doesNotMatch(`${page}${portal}${packageJson}`, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
-test("includes coach approval, native Hermes and WeChat routes", async () => {
-  const [coach, assistant, deepseek, weixin] = await Promise.all([
+test("includes coach approval, native Hermes and WeCom AI Bot tooling", async () => {
+  const [coach, assistant, deepseek, tools, contact] = await Promise.all([
     readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/assistant-view.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/agent/chat/route.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/notifications/weixin/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/hermes_tools_mcp.py", import.meta.url), "utf8"),
+    readFile(new URL("../server/wecom-contact.mjs", import.meta.url), "utf8"),
   ]);
   assert.match(coach, /教练工作台/);
   assert.match(assistant, /Hermes Agent/);
   assert.match(deepseek, /deepseek-v4-flash/);
-  assert.match(weixin, /hermes-weixin/);
-  assert.match(assistant, /notifications\/weixin/);
+  assert.match(coach, /企业微信 AI Bot/);
+  assert.match(tools, /get_member_by_id/);
+  assert.match(contact, /externalcontact\/add_msg_template/);
+  assert.match(contact, /发送任务已创建，请在企业微信客户端确认发送。/);
+  assert.doesNotMatch(`${assistant}${contact}`, /notifications\/weixin|WECOM_WEBHOOK_URL/);
 });
 
 test("keeps mainland deployment and secret configuration documented", async () => {
@@ -37,8 +40,22 @@ test("keeps mainland deployment and secret configuration documented", async () =
   ]);
   assert.match(envExample, /DEEPSEEK_API_KEY/);
   assert.match(envExample, /HERMES_API_KEY/);
+  assert.match(envExample, /WECOM_CONTACT_SECRET/);
+  assert.match(envExample, /WECOM_ALLOWED_COACH_USERIDS/);
   assert.match(compose, /Asia\/Shanghai/);
   assert.match(readme, /ICP\s*备案/);
+});
+
+test("documents one Hermes instance and denies nickname-based member matching", async () => {
+  const [readme, soul, tools] = await Promise.all([
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+    readFile(new URL("../deployment/hermes-wecom-soul.md", import.meta.url), "utf8"),
+    readFile(new URL("../server/hermes_tools_mcp.py", import.meta.url), "utf8"),
+  ]);
+  assert.match(readme, /唯一实例/);
+  assert.match(readme, /不使用 OpenClaw、ClawBot、iLink/);
+  assert.match(soul, /禁止用姓名、企业微信昵称、普通微信昵称/);
+  assert.match(tools, /不得把任务创建或企业微信报告已发送表述为会员已收到/);
 });
 
 test("supports safe member self-registration and automatic sign-in", async () => {
