@@ -54,7 +54,7 @@ test("removes member booking and gives the coach interactive schedule control", 
   assert.match(coach, /coach-body/);
   assert.match(server, /coach_booking_add/);
   assert.match(server, /coach_booking_delete/);
-  assert.match(server, /AI 助理仅供教练与管理员使用/);
+  assert.match(server, /Hermes AI 助理仅供教练账号使用/);
 });
 
 test("adds interactive charts, distinct admin sections, and Hermes website management tools", async () => {
@@ -137,6 +137,7 @@ test("ships the final responsive member polish and simplified admin navigation",
   }
   const adminNavBlock = portal.slice(portal.indexOf("const adminNav"), portal.indexOf("export function FitnessPortal"));
   assert.doesNotMatch(adminNavBlock, /教练运营/);
+  assert.doesNotMatch(adminNavBlock, /\/coach\/schedule/);
   assert.match(admin, /admin-settings-layout/);
   assert.match(admin, /integration-status-grid/);
   assert.match(admin, /fetch\("\/health"/);
@@ -146,4 +147,30 @@ test("ships the final responsive member polish and simplified admin navigation",
   assert.match(css, /\.integration-status-grid em\.warning/);
   assert.match(css, /@media \(max-width: 720px\)/);
   assert.match(css, /\.admin-settings-layout \{ grid-template-columns: 1fr; \}/);
+});
+
+test("separates administrator and coach accounts, portals, and permissions", async () => {
+  const [portal, server, adminView, css, adminLoginRoute, coachLoginRoute] = await Promise.all([
+    readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../server/index.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/login/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/coach/login/page.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(portal, /expected_role: requestedRole/);
+  assert.doesNotMatch(portal, /requestedRole === "coach" && result\.user\.role === "admin"/);
+  assert.match(portal, /管理端独立登录/);
+  assert.match(portal, /教练端独立登录/);
+  assert.match(portal, /系统管理员/);
+  assert.match(server, /user\.role !== expectedRole/);
+  assert.match(server, /managementAction && session\.role !== "coach"/);
+  assert.match(server, /if \(session\.role !== "coach"\)/);
+  assert.match(server, /WHERE role='member'/);
+  assert.match(adminView, /name: "系统管理员", role: "管理员"/);
+  assert.match(adminView, /name: "邵教练", role: "教练"/);
+  assert.match(css, /\.admin-login-page \.login-brand-panel/);
+  assert.match(css, /\.coach-login-page \.login-brand-panel/);
+  assert.match(adminLoginRoute, /initialView="admin"/);
+  assert.match(coachLoginRoute, /initialView="coach"/);
 });

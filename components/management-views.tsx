@@ -172,7 +172,8 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
   const [managedUser, setManagedUser] = useState<AdminUser | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([
-    { id: "admin-shao", name: "邵教练", role: "管理员 / 主教练", phone: "138****6608", status: "正常" },
+    { id: "admin-shao", name: "系统管理员", role: "管理员", phone: "138****8808", status: "正常" },
+    { id: "coach-shao", name: "邵教练", role: "教练", phone: "138****6608", status: "正常" },
     { id: "member-li", name: "李明", role: "尊享会员", phone: "138****5206", status: "正常" },
     { id: "member-wang", name: "王芳", role: "年度会员", phone: "136****1183", status: "正常" },
     { id: "member-zhang", name: "张伟", role: "季度会员", phone: "159****9021", status: "待激活" },

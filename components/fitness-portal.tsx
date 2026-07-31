@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Activity,
   Apple,
@@ -65,7 +66,6 @@ const coachNav = [
 const adminNav = [
   { view: "admin", label: "系统总览", icon: LayoutDashboard, href: "/admin" },
   { view: "admin-ai", label: "AI 建议管理", icon: Sparkles, href: "/admin/ai-suggestions" },
-  { view: "coach-schedule", label: "课程排期", icon: CalendarDays, href: "/coach/schedule" },
   { view: "admin-notifications", label: "消息通知", icon: MessageCircleMore, href: "/admin/notifications" },
   { view: "admin-users", label: "用户与角色", icon: UserRound, href: "/admin/users" },
   { view: "admin-settings", label: "系统设置", icon: Settings, href: "/admin/settings" },
@@ -102,6 +102,9 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
 
   const navigation = role === "member" ? memberNav : role === "coach" ? coachNav : adminNav;
   const management = role !== "member";
+  const accountName = role === "member" ? state.profile.name : role === "coach" ? "邵教练" : "系统管理员";
+  const accountSubtitle = role === "member" ? "尊享会员" : role === "coach" ? "主教练" : "平台管理员";
+  const sidebarSubtitle = role === "coach" ? "私人健身教练 · 鄂州" : "独立管理账户 · 权限审计";
 
   useEffect(() => {
     fetch("/api/auth/me", { credentials: "include" })
@@ -183,6 +186,14 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
       notify("该功能仅供教练使用", "warning");
       return;
     }
+    if (authStatus === "authenticated" && role === "coach" && nextView.startsWith("admin")) {
+      notify("教练账号不能进入管理端", "warning");
+      return;
+    }
+    if (authStatus === "authenticated" && role === "admin" && (nextView.startsWith("coach") || nextView === "assistant")) {
+      notify("管理员账号不能进入教练工作台", "warning");
+      return;
+    }
     const resolvedLabel = label ?? navigation.find((item) => item.view === nextView)?.label ?? memberNav.find((item) => item.view === nextView)?.label;
     if (resolvedLabel) setActiveNavLabel(resolvedLabel);
     setView(nextView);
@@ -213,6 +224,8 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
       setProfileOpen(false);
       setAuthorizedRole(null);
       setAuthStatus("unauthorized");
+      const loginPath = role === "admin" ? "/admin/login" : role === "coach" ? "/coach/login" : "/";
+      window.history.replaceState({}, "", loginPath);
     }
   }
 
@@ -272,13 +285,13 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
             <button className={`icon-button notification-button ${notificationOpen ? "active" : ""}`} onClick={() => { setNotificationOpen((open) => !open); setProfileOpen(false); }} aria-label="通知" aria-expanded={notificationOpen}><Bell size={20} /><i>5</i></button>
             {notificationOpen ? <div className="notification-popover">
               <div className="row-between"><b>消息通知</b><button className="text-button" onClick={() => notify("全部通知已标为已读")}>全部已读</button></div>
-              <button onClick={() => { setNotificationOpen(false); goTo(management ? "coach-schedule" : "dashboard", management ? "/coach/schedule" : "/", management ? "课程排期" : "首页"); }}><CalendarDays size={18} /><span><b>{management ? "私教排期待确认" : "私教安排已更新"}</b><small>明天 14:00 一对一私教</small></span><em>刚刚</em></button>
+              <button onClick={() => { setNotificationOpen(false); goTo(role === "admin" ? "admin-notifications" : role === "coach" ? "coach-schedule" : "dashboard", role === "admin" ? "/admin/notifications" : role === "coach" ? "/coach/schedule" : "/", role === "admin" ? "消息通知" : role === "coach" ? "课程排期" : "首页"); }}><CalendarDays size={18} /><span><b>{role === "admin" ? "系统通知待处理" : management ? "私教排期待确认" : "私教安排已更新"}</b><small>{role === "admin" ? "查看平台安全与业务通知" : "明天 14:00 一对一私教"}</small></span><em>刚刚</em></button>
               {management ? <button onClick={() => { setNotificationOpen(false); goTo(role === "admin" ? "admin-ai" : "assistant", role === "admin" ? "/admin/ai-suggestions" : "/assistant", role === "admin" ? "AI 建议管理" : "AI 助理"); }}><Sparkles size={18} /><span><b>AI 建议待处理</b><small>李明减脂专项建议已生成</small></span><em>8 分钟</em></button> : <button onClick={() => { setNotificationOpen(false); goTo("nutrition", "/nutrition"); }}><Apple size={18} /><span><b>今日饮食待记录</b><small>晚餐与饮水目标尚未完成</small></span><em>8 分钟</em></button>}
-              <button onClick={() => { setNotificationOpen(false); goTo("body", "/body"); }}><Activity size={18} /><span><b>身体数据已更新</b><small>最新体重 67.9 kg</small></span><em>今天</em></button>
+              <button onClick={() => { setNotificationOpen(false); goTo(role === "admin" ? "admin-notifications" : role === "coach" ? "coach-body" : "body", role === "admin" ? "/admin/notifications" : role === "coach" ? "/coach/body" : "/body", role === "admin" ? "消息通知" : role === "coach" ? "身体反馈" : "身体数据"); }}><Activity size={18} /><span><b>{role === "admin" ? "会员数据变更记录" : "身体数据已更新"}</b><small>{role === "admin" ? "前往通知中心查看审计信息" : "最新体重 67.9 kg"}</small></span><em>今天</em></button>
             </div> : null}
           </div>
           <div className="profile-menu">
-            <button className="profile-trigger" onClick={() => { setProfileOpen((open) => !open); setNotificationOpen(false); }} aria-expanded={profileOpen}><Avatar name={role === "member" ? state.profile.name : "邵教练"} /><span><b>{role === "member" ? state.profile.name : "邵教练"}</b><small>{role === "member" ? "尊享会员" : role === "coach" ? "主教练" : "超级管理员"}</small></span><ChevronDown size={16} /></button>
+            <button className="profile-trigger" onClick={() => { setProfileOpen((open) => !open); setNotificationOpen(false); }} aria-expanded={profileOpen}><Avatar name={accountName} /><span><b>{accountName}</b><small>{accountSubtitle}</small></span><ChevronDown size={16} /></button>
             {profileOpen ? (
               <div className="profile-popover">
                 <span className="eyebrow">{authStatus === "demo" ? "切换演示角色" : "当前账号"}</span>
@@ -297,7 +310,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
           <nav aria-label="管理导航">
             {navigation.map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-${index}`} href={href} className={activeNavLabel === label ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href, label); }}><Icon size={18} />{label}{label.includes("AI") ? <em>8</em> : null}</a>)}
           </nav>
-          <div className="sidebar-profile"><Avatar name="邵教练" size="lg" /><div><b>邵教练</b><small>私人健身教练 · 鄂州</small></div>{role === "coach" ? <button className="button button-primary full" onClick={() => goTo("assistant", "/assistant", "AI 助理")}>AI 工作台</button> : null}</div>
+          <div className="sidebar-profile"><Avatar name={accountName} size="lg" /><div><b>{accountName}</b><small>{sidebarSubtitle}</small></div>{role === "coach" ? <button className="button button-primary full" onClick={() => goTo("assistant", "/assistant", "AI 助理")}>AI 工作台</button> : null}</div>
         </aside>
       ) : null}
 
@@ -334,6 +347,21 @@ function LoginScreen({ requestedRole, onSuccess }: { requestedRole: Role; onSucc
   const [busy, setBusy] = useState(false);
   const managementLogin = requestedRole !== "member";
   const registering = !managementLogin && mode === "register";
+  const adminLogin = requestedRole === "admin";
+  const coachLogin = requestedRole === "coach";
+  const roleLabel = adminLogin ? "管理员" : coachLogin ? "教练" : "会员";
+  const brandSubtitle = adminLogin ? "平台治理与账户安全" : coachLogin ? "教练业务工作台" : "鄂州 · 一对一科学训练";
+  const brandEyebrow = adminLogin ? "平台治理 · 权限隔离" : coachLogin ? "会员服务 · 训练执行" : "专属训练 · 长期主义";
+  const brandTitle = adminLogin
+    ? "把系统、账号与数据权限，交给独立管理端。"
+    : coachLogin
+      ? "专注会员、课程与训练，不被系统管理打断。"
+      : "把每一次训练，变成看得见的进步。";
+  const brandDescription = adminLogin
+    ? "管理账号、角色、审计与平台配置；管理端不进入教练排课和 Hermes 对话。"
+    : coachLogin
+      ? "使用独立教练账号管理会员、安排课程、维护方案并调用 Hermes 智能助理。"
+      : "一对一训练安排、饮食执行与身体趋势，清晰记录在你的专属会员空间。";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -354,12 +382,13 @@ function LoginScreen({ requestedRole, onSuccess }: { requestedRole: Role; onSucc
         } : {
           phone: data.get("phone"),
           password: data.get("password"),
+          expected_role: requestedRole,
         }),
       });
       const result = await response.json() as { user?: { role?: Role }; error?: string };
       if (!response.ok || !result.user?.role) throw new Error(result.error ?? (registering ? "注册失败" : "登录失败"));
-      if (managementLogin && result.user.role !== requestedRole && !(requestedRole === "coach" && result.user.role === "admin")) {
-        throw new Error(`当前账号不是${requestedRole === "admin" ? "管理员" : "教练"}账号，请核对登录入口`);
+      if (!registering && result.user.role !== requestedRole) {
+        throw new Error(`当前账号不是${roleLabel}账号，请使用正确入口登录`);
       }
       onSuccess(result.user.role);
     } catch (reason) {
@@ -376,18 +405,22 @@ function LoginScreen({ requestedRole, onSuccess }: { requestedRole: Role; onSucc
   }
 
   return (
-    <main className={`login-page ${managementLogin ? "management-login-page" : ""}`}>
+    <main className={`login-page ${managementLogin ? "management-login-page" : ""} ${adminLogin ? "admin-login-page" : coachLogin ? "coach-login-page" : "member-login-page"}`}>
       <section className="login-brand-panel">
-        <div className="brand login-brand"><span className="brand-mark"><Activity size={25} /></span><span><b>邵教练专属会员平台</b><small>鄂州 · 一对一科学训练</small></span></div>
-        <div><span className="eyebrow light">专属训练 · 长期主义</span><h1>把每一次训练，变成看得见的进步。</h1><p>一对一训练安排、饮食执行与身体趋势，清晰记录在你的专属会员空间。</p></div>
-        <div className="login-trust"><span><ShieldCheck size={18} /> 分角色数据访问</span><span><LockKeyhole size={18} /> 密码安全加密存储</span><span><CalendarCheck size={18} /> 教练统一课程排期</span></div>
+        <div className="brand login-brand"><span className="brand-mark"><Activity size={25} /></span><span><b>邵教练专属会员平台</b><small>{brandSubtitle}</small></span></div>
+        <div><span className="eyebrow light">{brandEyebrow}</span><h1>{brandTitle}</h1><p>{brandDescription}</p></div>
+        <div className="login-trust">
+          <span><ShieldCheck size={18} /> {adminLogin ? "角色与权限独立管理" : coachLogin ? "仅教练可调用管理工具" : "分角色数据访问"}</span>
+          <span><LockKeyhole size={18} /> 密码安全加密存储</span>
+          <span><CalendarCheck size={18} /> {adminLogin ? "完整操作审计" : "教练统一课程排期"}</span>
+        </div>
       </section>
       <section className="login-form-panel">
         <form className="login-form" onSubmit={submit} key={mode}>
           {!managementLogin ? <div className="login-mode-switch" role="tablist" aria-label="登录或注册">
             <button type="button" role="tab" aria-selected={!registering} className={!registering ? "active" : ""} onClick={() => switchMode("login")}>登录</button>
             <button type="button" role="tab" aria-selected={registering} className={registering ? "active" : ""} onClick={() => switchMode("register")}>注册</button>
-          </div> : <div className="management-login-badge"><ShieldCheck size={18} /> {requestedRole === "admin" ? "管理端安全登录" : "教练端安全登录"}</div>}
+          </div> : <div className={`management-login-badge ${adminLogin ? "admin" : "coach"}`}>{adminLogin ? <ShieldCheck size={18} /> : <Dumbbell size={18} />} {adminLogin ? "管理端独立登录" : "教练端独立登录"}</div>}
           <span className="eyebrow">{registering ? "会员注册" : managementLogin ? requestedRole === "admin" ? "管理后台" : "教练工作台" : "会员登录"}</span>
           <h2>{registering ? "创建会员账号" : managementLogin ? `登录${requestedRole === "admin" ? "管理后台" : "教练工作台"}` : "欢迎回来"}</h2>
           <p>{registering ? "使用中国内地手机号注册，完成后将自动登录。" : managementLogin ? "使用已授权的手机号和密码登录；系统将校验账号角色。" : "使用手机号与密码登录你的专属会员空间。"}</p>
@@ -398,8 +431,8 @@ function LoginScreen({ requestedRole, onSuccess }: { requestedRole: Role; onSucc
           {registering ? <label className="login-consent"><input name="acceptedTerms" type="checkbox" required /><span>我已阅读并同意 <a href="/terms" target="_blank">用户协议</a> 和 <a href="/privacy" target="_blank">隐私政策</a></span></label> : null}
           {error ? <div className="login-error">{error}</div> : null}
           <button className="button button-primary full" type="submit" disabled={busy}>{busy ? (registering ? "正在创建账号…" : "正在安全登录…") : (registering ? "注册并进入平台" : "登录平台")}</button>
-          {!managementLogin ? <button className="login-mode-link" type="button" onClick={() => switchMode(registering ? "login" : "register")}>{registering ? "已有账号？返回登录" : "还没有账号？立即注册"}</button> : <button className="login-mode-link" type="button" onClick={() => window.location.assign("/")}>返回会员端</button>}
-          <small>{registering ? "仅开放会员注册；教练与管理员账号由系统管理员创建。" : "忘记密码请联系邵教练重置。为保护隐私，请勿共享账号。"}</small>
+          {!managementLogin ? <button className="login-mode-link" type="button" onClick={() => switchMode(registering ? "login" : "register")}>{registering ? "已有账号？返回登录" : "还没有账号？立即注册"}</button> : <nav className="portal-entry-links" aria-label="其他登录入口"><Link href={adminLogin ? "/coach/login" : "/admin/login"}>{adminLogin ? "我是教练，进入教练端" : "我是管理员，进入管理端"}</Link><Link href="/">返回会员端</Link></nav>}
+          <small>{registering ? "仅开放会员注册；教练与管理员账号由系统管理员创建。" : managementLogin ? `${roleLabel}账号只能从当前专属入口登录，不能与其他角色共用。` : "忘记密码请联系邵教练重置。为保护隐私，请勿共享账号。"}</small>
         </form>
         <footer>© 2026 邵教练专属会员平台 · 鄂州</footer>
       </section>

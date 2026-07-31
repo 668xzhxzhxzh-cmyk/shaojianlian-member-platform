@@ -203,6 +203,8 @@ async function login(request, response) {
   const body = await readJson(request);
   const phone = String(body.phone || "").replace(/\s/g, "");
   const password = String(body.password || "");
+  const expectedRole = String(body.expected_role || "");
+  if (!["member", "coach", "admin"].includes(expectedRole)) return json(response, 400, { error: "登录入口无效，请从对应角色入口重新登录" });
   if (!/^1\d{10}$/.test(phone) || password.length < 8 || password.length > 128) return json(response, 400, { error: "手机号或密码格式不正确" });
   const result = await pool.query("SELECT id,name,role,password_hash,status FROM users WHERE phone=$1 LIMIT 1", [phone]);
   const user = result.rows[0];
@@ -210,6 +212,11 @@ async function login(request, response) {
   if (!valid) {
     await new Promise((resolve) => setTimeout(resolve, 350));
     return json(response, 401, { error: "手机号或密码错误" });
+  }
+  if (user.role !== expectedRole) {
+    await audit(user.id, "login_role_mismatch", { expectedRole, actualRole: user.role });
+    const roleNames = { member: "会员端", coach: "教练端", admin: "管理端" };
+    return json(response, 403, { error: `该账号属于${roleNames[user.role]}，请从正确入口登录` });
   }
   return issueSession(response, user);
 }
@@ -325,7 +332,9 @@ async function writePortalState(userId, state) {
 
 async function listUsers(response, session) {
   if (!["coach", "admin"].includes(session.role)) return json(response, 403, { error: "没有用户管理权限" });
-  const result = await pool.query("SELECT id,name,phone,role,status,created_at FROM users ORDER BY created_at ASC LIMIT 500");
+  const result = session.role === "admin"
+    ? await pool.query("SELECT id,name,phone,role,status,created_at FROM users ORDER BY created_at ASC LIMIT 500")
+    : await pool.query("SELECT id,name,phone,role,status,created_at FROM users WHERE role='member' ORDER BY created_at ASC LIMIT 500");
   return json(response, 200, {
     users: result.rows.map((user) => ({
       ...user,
@@ -365,7 +374,7 @@ async function createUser(request, response, session) {
 async function handleAction(request, response, session) {
   const { action, payload = {} } = await readJson(request);
   const managementAction = String(action || "").startsWith("coach_");
-  if (managementAction && !["coach", "admin"].includes(session.role)) {
+  if (managementAction && session.role !== "coach") {
     return json(response, 403, { error: "仅教练可修改会员服务内容" });
   }
   const requestedMemberId = String(payload.member_id || "").trim();
@@ -436,9 +445,9 @@ async function handleAction(request, response, session) {
 }
 
 async function handleHermes(request, response, session) {
-  if (!["coach", "admin"].includes(session.role)) {
+  if (session.role !== "coach") {
     await audit(session.id, "hermes_chat_denied", { role: session.role });
-    return json(response, 403, { error: "AI 助理仅供教练与管理员使用" });
+    return json(response, 403, { error: "Hermes AI 助理仅供教练账号使用" });
   }
   const body = await readJson(request);
   const memberId = String(body.member_id || "").trim();
