@@ -25,6 +25,7 @@ if (-not $existing) {
 }
 
 $desktopCandidates = @(
+  (Join-Path $env:LOCALAPPDATA "hermes\hermes-agent\apps\desktop\release\win-unpacked\Hermes.exe"),
   (Join-Path $env:LOCALAPPDATA "Programs\Hermes\Hermes.exe"),
   (Join-Path $env:LOCALAPPDATA "Programs\Hermes Agent\Hermes Agent.exe"),
   (Join-Path $env:LOCALAPPDATA "Hermes\Hermes.exe")
