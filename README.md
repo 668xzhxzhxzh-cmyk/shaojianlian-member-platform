@@ -82,7 +82,7 @@ Hermes `/var/lib/hermes/.hermes/.env`：
 sudo sh scripts/install-hermes-wecom-tools.sh /opt/shao-coach
 ```
 
-然后把 `deployment/hermes-wecom-mcp.example.yaml` 合并到 Hermes `config.yaml`，将 MCP 仅启用到 `wecom` 平台，并验证：
+然后把 `deployment/hermes-wecom-mcp.example.yaml` 合并到 Hermes `config.yaml`，将同一个 MCP 启用到 `wecom`、网站使用的 `api_server` 和 Hermes Desktop 使用的 `cli` 平台，并验证：
 
 ```bash
 sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes mcp test shao-coach

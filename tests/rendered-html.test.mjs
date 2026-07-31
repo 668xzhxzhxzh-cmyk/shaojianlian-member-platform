@@ -25,7 +25,7 @@ test("includes coach approval, native agent and WeCom AI Bot tooling", async () 
   ]);
   assert.match(coach, /会员档案/);
   assert.match(coach, /训练方案设计/);
-  assert.match(assistant, /AI 智能教练/);
+  assert.match(assistant, /Hermes Agent/);
   assert.match(envExample, /DEEPSEEK_MODEL=deepseek-v4-flash/);
   assert.match(admin, /企业微信 AI 助理/);
   assert.match(tools, /get_member_by_id/);
@@ -76,7 +76,7 @@ test("adds interactive charts, distinct admin sections, and Hermes website manag
   assert.match(admin, /管理账户/);
   assert.match(admin, /saveManagedUser/);
   assert.doesNotMatch(assistant, /assistant-flow/);
-  for (const operation of ["add_private_session", "delete_private_session", "update_training_plan", "update_nutrition_plan", "add_body_feedback", "update_member_profile"]) {
+  for (const operation of ["list_members", "add_private_session", "update_private_session", "delete_private_session", "update_training_plan", "update_nutrition_plan", "add_body_feedback", "update_member_profile", "get_member_change_history"]) {
     assert.match(tools, new RegExp(operation));
     assert.match(contact, new RegExp(operation));
   }
@@ -173,4 +173,27 @@ test("separates administrator and coach accounts, portals, and permissions", asy
   assert.match(css, /\.coach-login-page \.login-brand-panel/);
   assert.match(adminLoginRoute, /initialView="admin"/);
   assert.match(coachLoginRoute, /initialView="coach"/);
+});
+
+test("shows five scrollable notifications, explains AI roles, and uses single-column management login", async () => {
+  const [portal, assistant, css, mcpConfig] = await Promise.all([
+    readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/assistant-view.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../deployment/hermes-wecom-mcp.example.yaml", import.meta.url), "utf8"),
+  ]);
+  assert.match(portal, /notification-popover-list/);
+  assert.match(portal, /共 5 条/);
+  assert.match(portal, /Hermes 可执行会员任务/);
+  assert.match(portal, /role === "admin" && itemView === "admin-ai"/);
+  assert.match(css, /max-height: 338px; overflow-y: auto/);
+  assert.match(css, /touch-action: pan-y/);
+  assert.match(portal, /login-page-single/);
+  assert.match(portal, /"教练端"/);
+  assert.match(portal, /"管理端"/);
+  assert.match(portal, />会员端</);
+  assert.match(assistant, /教练端：对话并执行会员任务/);
+  assert.match(assistant, /管理端：审核建议、权限与发送合规/);
+  assert.match(mcpConfig, /api_server:\s*\n\s*- shao-coach/);
+  assert.match(mcpConfig, /cli:\s*\n\s*- shao-coach/);
 });

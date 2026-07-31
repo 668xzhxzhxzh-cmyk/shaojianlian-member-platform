@@ -139,11 +139,36 @@ test("Hermes can add and delete a private session for an exact bound member", as
     date: "7/31",
     time: "18:00–19:00",
     focus: "下肢力量",
+    request_id: "member-1-20260731-1800",
   });
   assert.equal(added.response.status, 201);
   assert.equal(added.result.sync, "网站页面已自动同步");
   assert.equal(pool.state.bookings.length, 1);
   assert.equal(pool.state.bookings[0].focus, "下肢力量");
+
+  const replayed = await runHermesOperation(service, {
+    operation: "add_private_session",
+    day: "周五",
+    date: "7/31",
+    time: "18:00–19:00",
+    focus: "下肢力量",
+    request_id: "member-1-20260731-1800",
+  });
+  assert.equal(replayed.result.idempotent_replay, true);
+  assert.equal(pool.state.bookings.length, 1);
+
+  const updated = await runHermesOperation(service, {
+    operation: "update_private_session",
+    session_id: pool.state.bookings[0].id,
+    day: "周六",
+    date: "8/1",
+    time: "16:00–17:00",
+    focus: "核心稳定",
+    status: "待确认",
+  });
+  assert.equal(updated.response.status, 200);
+  assert.equal(pool.state.bookings[0].focus, "核心稳定");
+  assert.equal(pool.state.bookings[0].status, "待确认");
 
   const deleted = await runHermesOperation(service, {
     operation: "delete_private_session",
@@ -153,6 +178,7 @@ test("Hermes can add and delete a private session for an exact bound member", as
   assert.equal(pool.state.bookings.length, 0);
   assert.deepEqual(pool.audits.map((item) => item.action), [
     "hermes_private_session_added",
+    "hermes_private_session_updated",
     "hermes_private_session_deleted",
   ]);
 });

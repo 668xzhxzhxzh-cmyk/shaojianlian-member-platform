@@ -105,6 +105,16 @@ def get_member_by_id(member_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def list_members() -> dict[str, Any]:
+    """列出当前教练已绑定会员的精确 member_id、姓名和状态。
+
+    此工具只用于让教练选择明确的 member_id；不得按姓名自动执行修改。
+    """
+
+    return _call("list_members")
+
+
+@mcp.tool()
 def add_private_session(
     member_id: str,
     day: str,
@@ -112,6 +122,7 @@ def add_private_session(
     time: str,
     focus: str,
     status: str = "已预约",
+    request_id: str = "",
 ) -> dict[str, Any]:
     """为精确 member_id 新增一节一对一私教并立即同步网站。
 
@@ -126,6 +137,7 @@ def add_private_session(
         time=time,
         focus=focus,
         status=status,
+        request_id=request_id,
     )
 
 
@@ -143,6 +155,34 @@ def delete_private_session(
         "delete_private_session",
         member_id=member_id,
         session_id=session_id,
+    )
+
+
+@mcp.tool()
+def update_private_session(
+    member_id: str,
+    session_id: str,
+    day: str = "",
+    date: str = "",
+    time: str = "",
+    focus: str = "",
+    status: str = "",
+) -> dict[str, Any]:
+    """调整一节指定私教课的日期、时间、训练重点或状态。
+
+    必须同时提供精确 member_id 与 session_id；未填写的字段保持不变。
+    修改前应先通过 get_member_by_id 核对课程，修改后再次查询确认。
+    """
+
+    return _call(
+        "update_private_session",
+        member_id=member_id,
+        session_id=session_id,
+        day=day,
+        date=date,
+        time=time,
+        focus=focus,
+        status=status,
     )
 
 
@@ -227,6 +267,20 @@ def update_member_profile(
         plan=plan,
         expires_at=expires_at,
         level=level,
+    )
+
+
+@mcp.tool()
+def get_member_change_history(
+    member_id: str,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """查询指定会员最近的网站管理变更，用于核验工具是否真正执行成功。"""
+
+    return _call(
+        "get_member_change_history",
+        member_id=member_id,
+        limit=limit,
     )
 
 

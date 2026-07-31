@@ -60,7 +60,7 @@ const coachNav = [
   { view: "coach-training", label: "训练方案", icon: Dumbbell, href: "/coach/training" },
   { view: "coach-nutrition", label: "饮食方案", icon: Apple, href: "/coach/nutrition" },
   { view: "coach-body", label: "身体反馈", icon: Activity, href: "/coach/body" },
-  { view: "assistant", label: "AI 助理", icon: Bot, href: "/assistant" },
+  { view: "assistant", label: "Hermes AI 助理", icon: Bot, href: "/assistant" },
 ] as const;
 
 const adminNav = [
@@ -89,13 +89,14 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
     initialView.startsWith("admin")
       ? adminNav.find((item) => item.view === initialView)?.label ?? "系统总览"
       : initialView === "assistant"
-        ? "AI 助理"
+        ? "Hermes AI 助理"
         : coachNav.find((item) => item.view === initialView)?.label
           ?? memberNav.find((item) => item.view === initialView)?.label
           ?? "首页",
   );
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [selectedCoachMember, setSelectedCoachMember] = useState("member-li");
   const [authStatus, setAuthStatus] = useState<"checking" | "demo" | "authenticated" | "unauthorized">("checking");
@@ -105,6 +106,27 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
   const accountName = role === "member" ? state.profile.name : role === "coach" ? "邵教练" : "系统管理员";
   const accountSubtitle = role === "member" ? "尊享会员" : role === "coach" ? "主教练" : "平台管理员";
   const sidebarSubtitle = role === "coach" ? "私人健身教练 · 鄂州" : "独立管理账户 · 权限审计";
+  const pendingAiCount = state.suggestions.filter((item) => item.status === "待确认").length;
+  const notificationItems = role === "admin" ? [
+    { id: "admin-system", icon: ShieldCheck, title: "系统通知待处理", detail: "查看平台安全与业务通知", time: "刚刚", view: "admin-notifications", href: "/admin/notifications", label: "消息通知" },
+    { id: "admin-ai", icon: Sparkles, title: "AI 建议等待审核", detail: `${pendingAiCount} 条建议需要合规复核`, time: "8 分钟", view: "admin-ai", href: "/admin/ai-suggestions", label: "AI 建议管理" },
+    { id: "admin-user", icon: UsersRound, title: "新增会员账号", detail: "新注册会员等待角色确认", time: "今天", view: "admin-users", href: "/admin/users", label: "用户与角色" },
+    { id: "admin-audit", icon: Activity, title: "会员数据变更记录", detail: "训练方案与课程记录有新变更", time: "今天", view: "admin-notifications", href: "/admin/notifications", label: "消息通知" },
+    { id: "admin-config", icon: Settings, title: "系统配置检查完成", detail: "网站、数据库和 Hermes 服务运行正常", time: "昨天", view: "admin-settings", href: "/admin/settings", label: "系统设置" },
+  ] : role === "coach" ? [
+    { id: "coach-schedule", icon: CalendarDays, title: "私教排期待确认", detail: "明天 14:00 一对一私教", time: "刚刚", view: "coach-schedule", href: "/coach/schedule", label: "课程排期" },
+    { id: "coach-hermes", icon: Bot, title: "Hermes 可执行会员任务", detail: "可增删课程并调整训练、饮食方案", time: "8 分钟", view: "assistant", href: "/assistant", label: "Hermes AI 助理" },
+    { id: "coach-body", icon: Activity, title: "会员身体数据已更新", detail: "李明最新体重 67.9 kg", time: "今天", view: "coach-body", href: "/coach/body", label: "身体反馈" },
+    { id: "coach-nutrition", icon: Apple, title: "饮食执行需要跟进", detail: "两位会员今日饮食记录未完成", time: "今天", view: "coach-nutrition", href: "/coach/nutrition", label: "饮食方案" },
+    { id: "coach-member", icon: UsersRound, title: "会员计划即将到期", detail: "一位会员计划将在 7 天内到期", time: "昨天", view: "coach-members", href: "/coach/members", label: "会员管理" },
+  ] : [
+    { id: "member-schedule", icon: CalendarDays, title: "私教安排已更新", detail: "明天 14:00 一对一私教", time: "刚刚", view: "dashboard", href: "/", label: "首页" },
+    { id: "member-nutrition", icon: Apple, title: "今日饮食待记录", detail: "晚餐与饮水目标尚未完成", time: "8 分钟", view: "nutrition", href: "/nutrition", label: "饮食管理" },
+    { id: "member-body", icon: Activity, title: "身体数据已更新", detail: "最新体重 67.9 kg", time: "今天", view: "body", href: "/body", label: "身体数据" },
+    { id: "member-checkin", icon: CalendarCheck, title: "连续打卡提醒", detail: "完成今日记录可保持连续打卡", time: "今天", view: "checkins", href: "/checkins", label: "打卡记录" },
+    { id: "member-benefits", icon: Trophy, title: "会员权益提醒", detail: "本月体态评估权益尚未使用", time: "昨天", view: "benefits", href: "/benefits", label: "会员权益" },
+  ];
+  const unreadNotificationCount = notificationItems.filter((item) => !readNotificationIds.includes(item.id)).length;
 
   useEffect(() => {
     fetch("/api/auth/me", { credentials: "include" })
@@ -136,7 +158,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
             const currentCoachItem = coachNav.find((item) => item.href === window.location.pathname);
             const nextCoachView = currentCoachItem?.view ?? (window.location.pathname === "/assistant" ? "assistant" : "coach");
             setView(nextCoachView);
-            setActiveNavLabel(currentCoachItem?.label ?? (nextCoachView === "assistant" ? "AI 助理" : "工作台"));
+            setActiveNavLabel(currentCoachItem?.label ?? (nextCoachView === "assistant" ? "Hermes AI 助理" : "工作台"));
             if (!window.location.pathname.startsWith("/coach") && window.location.pathname !== "/assistant") window.history.replaceState({}, "", "/coach");
           }
           if (authenticatedRole === "admin") {
@@ -256,7 +278,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
           "coach-nutrition": "nutrition",
           "coach-body": "body",
         };
-        return <CoachWorkspace section={coachSectionMap[view] ?? "overview"} selectedMemberId={selectedCoachMember} onSelectMember={selectCoachMember} goTo={goTo} openAssistant={() => goTo("assistant", "/assistant", "AI 助理")} />;
+        return <CoachWorkspace section={coachSectionMap[view] ?? "overview"} selectedMemberId={selectedCoachMember} onSelectMember={selectCoachMember} goTo={goTo} openAssistant={() => goTo("assistant", "/assistant", "Hermes AI 助理")} />;
       }
       case "admin": return <AdminView section="overview" />;
       case "admin-ai": return <AdminView section="ai-suggestions" />;
@@ -282,12 +304,12 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
         ) : null}
         <div className="topbar-actions">
           <div className="notification-menu">
-            <button className={`icon-button notification-button ${notificationOpen ? "active" : ""}`} onClick={() => { setNotificationOpen((open) => !open); setProfileOpen(false); }} aria-label="通知" aria-expanded={notificationOpen}><Bell size={20} /><i>5</i></button>
+            <button className={`icon-button notification-button ${notificationOpen ? "active" : ""}`} onClick={() => { setNotificationOpen((open) => !open); setProfileOpen(false); }} aria-label={`通知，${unreadNotificationCount} 条未读`} aria-expanded={notificationOpen}><Bell size={20} />{unreadNotificationCount ? <i>{unreadNotificationCount}</i> : null}</button>
             {notificationOpen ? <div className="notification-popover">
-              <div className="row-between"><b>消息通知</b><button className="text-button" onClick={() => notify("全部通知已标为已读")}>全部已读</button></div>
-              <button onClick={() => { setNotificationOpen(false); goTo(role === "admin" ? "admin-notifications" : role === "coach" ? "coach-schedule" : "dashboard", role === "admin" ? "/admin/notifications" : role === "coach" ? "/coach/schedule" : "/", role === "admin" ? "消息通知" : role === "coach" ? "课程排期" : "首页"); }}><CalendarDays size={18} /><span><b>{role === "admin" ? "系统通知待处理" : management ? "私教排期待确认" : "私教安排已更新"}</b><small>{role === "admin" ? "查看平台安全与业务通知" : "明天 14:00 一对一私教"}</small></span><em>刚刚</em></button>
-              {management ? <button onClick={() => { setNotificationOpen(false); goTo(role === "admin" ? "admin-ai" : "assistant", role === "admin" ? "/admin/ai-suggestions" : "/assistant", role === "admin" ? "AI 建议管理" : "AI 助理"); }}><Sparkles size={18} /><span><b>AI 建议待处理</b><small>李明减脂专项建议已生成</small></span><em>8 分钟</em></button> : <button onClick={() => { setNotificationOpen(false); goTo("nutrition", "/nutrition"); }}><Apple size={18} /><span><b>今日饮食待记录</b><small>晚餐与饮水目标尚未完成</small></span><em>8 分钟</em></button>}
-              <button onClick={() => { setNotificationOpen(false); goTo(role === "admin" ? "admin-notifications" : role === "coach" ? "coach-body" : "body", role === "admin" ? "/admin/notifications" : role === "coach" ? "/coach/body" : "/body", role === "admin" ? "消息通知" : role === "coach" ? "身体反馈" : "身体数据"); }}><Activity size={18} /><span><b>{role === "admin" ? "会员数据变更记录" : "身体数据已更新"}</b><small>{role === "admin" ? "前往通知中心查看审计信息" : "最新体重 67.9 kg"}</small></span><em>今天</em></button>
+              <div className="row-between"><span><b>消息通知</b><small>共 5 条 · {unreadNotificationCount} 条未读</small></span><button className="text-button" onClick={() => { setReadNotificationIds(notificationItems.map((item) => item.id)); notify("5 条通知已全部标为已读"); }}>全部已读</button></div>
+              <div className="notification-popover-list" tabIndex={0} aria-label="通知列表，可上下滚动">
+                {notificationItems.map(({ id, icon: Icon, title, detail, time, view: nextView, href, label }) => <button className={readNotificationIds.includes(id) ? "is-read" : ""} key={id} onClick={() => { setReadNotificationIds((current) => current.includes(id) ? current : [...current, id]); setNotificationOpen(false); goTo(nextView, href, label); }}><Icon size={18} /><span><b>{title}</b><small>{detail}</small></span><em>{time}</em></button>)}
+              </div>
             </div> : null}
           </div>
           <div className="profile-menu">
@@ -308,9 +330,9 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
       {management ? (
         <aside className="sidebar">
           <nav aria-label="管理导航">
-            {navigation.map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-${index}`} href={href} className={activeNavLabel === label ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href, label); }}><Icon size={18} />{label}{label.includes("AI") ? <em>8</em> : null}</a>)}
+            {navigation.map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-${index}`} href={href} className={activeNavLabel === label ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href, label); }}><Icon size={18} />{label}{role === "admin" && itemView === "admin-ai" && pendingAiCount ? <em title={`${pendingAiCount} 条 AI 建议等待管理员审核`} aria-label={`${pendingAiCount} 条待审核 AI 建议`}>{pendingAiCount}</em> : null}</a>)}
           </nav>
-          <div className="sidebar-profile"><Avatar name={accountName} size="lg" /><div><b>{accountName}</b><small>{sidebarSubtitle}</small></div>{role === "coach" ? <button className="button button-primary full" onClick={() => goTo("assistant", "/assistant", "AI 助理")}>AI 工作台</button> : null}</div>
+          <div className="sidebar-profile"><Avatar name={accountName} size="lg" /><div><b>{accountName}</b><small>{sidebarSubtitle}</small></div>{role === "coach" ? <button className="button button-primary full" onClick={() => goTo("assistant", "/assistant", "Hermes AI 助理")}>Hermes 工作台</button> : null}</div>
         </aside>
       ) : null}
 
@@ -405,8 +427,8 @@ function LoginScreen({ requestedRole, onSuccess }: { requestedRole: Role; onSucc
   }
 
   return (
-    <main className={`login-page ${managementLogin ? "management-login-page" : ""} ${adminLogin ? "admin-login-page" : coachLogin ? "coach-login-page" : "member-login-page"}`}>
-      <section className="login-brand-panel">
+    <main className={`login-page ${managementLogin ? "management-login-page login-page-single" : ""} ${adminLogin ? "admin-login-page" : coachLogin ? "coach-login-page" : "member-login-page"}`}>
+      {!managementLogin ? <section className="login-brand-panel">
         <div className="brand login-brand"><span className="brand-mark"><Activity size={25} /></span><span><b>邵教练专属会员平台</b><small>{brandSubtitle}</small></span></div>
         <div><span className="eyebrow light">{brandEyebrow}</span><h1>{brandTitle}</h1><p>{brandDescription}</p></div>
         <div className="login-trust">
@@ -414,7 +436,7 @@ function LoginScreen({ requestedRole, onSuccess }: { requestedRole: Role; onSucc
           <span><LockKeyhole size={18} /> 密码安全加密存储</span>
           <span><CalendarCheck size={18} /> {adminLogin ? "完整操作审计" : "教练统一课程排期"}</span>
         </div>
-      </section>
+      </section> : null}
       <section className="login-form-panel">
         <form className="login-form" onSubmit={submit} key={mode}>
           {!managementLogin ? <div className="login-mode-switch" role="tablist" aria-label="登录或注册">
@@ -431,7 +453,7 @@ function LoginScreen({ requestedRole, onSuccess }: { requestedRole: Role; onSucc
           {registering ? <label className="login-consent"><input name="acceptedTerms" type="checkbox" required /><span>我已阅读并同意 <a href="/terms" target="_blank">用户协议</a> 和 <a href="/privacy" target="_blank">隐私政策</a></span></label> : null}
           {error ? <div className="login-error">{error}</div> : null}
           <button className="button button-primary full" type="submit" disabled={busy}>{busy ? (registering ? "正在创建账号…" : "正在安全登录…") : (registering ? "注册并进入平台" : "登录平台")}</button>
-          {!managementLogin ? <button className="login-mode-link" type="button" onClick={() => switchMode(registering ? "login" : "register")}>{registering ? "已有账号？返回登录" : "还没有账号？立即注册"}</button> : <nav className="portal-entry-links" aria-label="其他登录入口"><Link href={adminLogin ? "/coach/login" : "/admin/login"}>{adminLogin ? "我是教练，进入教练端" : "我是管理员，进入管理端"}</Link><Link href="/">返回会员端</Link></nav>}
+          {!managementLogin ? <button className="login-mode-link" type="button" onClick={() => switchMode(registering ? "login" : "register")}>{registering ? "已有账号？返回登录" : "还没有账号？立即注册"}</button> : <nav className="portal-entry-links" aria-label="其他登录入口"><Link href={adminLogin ? "/coach/login" : "/admin/login"}>{adminLogin ? "教练端" : "管理端"}</Link><Link href="/">会员端</Link></nav>}
           <small>{registering ? "仅开放会员注册；教练与管理员账号由系统管理员创建。" : managementLogin ? `${roleLabel}账号只能从当前专属入口登录，不能与其他角色共用。` : "忘记密码请联系邵教练重置。为保护隐私，请勿共享账号。"}</small>
         </form>
         <footer>© 2026 邵教练专属会员平台 · 鄂州</footer>

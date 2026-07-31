@@ -36,9 +36,17 @@ export function createWecomContactService({ pool }) {
       const member = await getMemberById(body.member_id, coachUserId);
       return sendJson(response, 200, { member });
     }
+    if (operation === "list_members") {
+      const members = await listMembers(coachUserId);
+      return sendJson(response, 200, { members });
+    }
     if (operation === "add_private_session") {
       const result = await addPrivateSession(body, coachUserId);
       return sendJson(response, 201, result);
+    }
+    if (operation === "update_private_session") {
+      const result = await updatePrivateSession(body, coachUserId);
+      return sendJson(response, 200, result);
     }
     if (operation === "delete_private_session") {
       const result = await deletePrivateSession(body, coachUserId);
@@ -59,6 +67,10 @@ export function createWecomContactService({ pool }) {
     if (operation === "update_member_profile") {
       const result = await updateMemberProfile(body, coachUserId);
       return sendJson(response, 200, result);
+    }
+    if (operation === "get_member_change_history") {
+      const history = await getMemberChangeHistory(body.member_id, body.limit, coachUserId);
+      return sendJson(response, 200, { history });
     }
     if (operation === "list_customer_ids") {
       const customers = await listCustomerIds(coachUserId);
@@ -137,6 +149,27 @@ export function createWecomContactService({ pool }) {
     };
   }
 
+  async function listMembers(coachUserId) {
+    const result = await pool.query(
+      `SELECT u.id,u.name,u.status,b.external_userid,p.updated_at
+       FROM users u
+       JOIN member_wecom_bindings b ON b.member_id=u.id AND b.status='active'
+       LEFT JOIN portal_state p ON p.user_id=u.id
+       WHERE u.role='member' AND b.coach_userid=$1
+       ORDER BY u.name ASC
+       LIMIT 500`,
+      [coachUserId],
+    );
+    await auditOperation(coachUserId, "hermes_member_list_viewed", { count: result.rows.length });
+    return result.rows.map((row) => ({
+      member_id: row.id,
+      name: row.name,
+      status: row.status,
+      external_userid_bound: Boolean(row.external_userid),
+      updated_at: row.updated_at,
+    }));
+  }
+
   async function loadBoundMemberState(rawMemberId, coachUserId) {
     const memberId = normalizeId(rawMemberId, "member_id");
     const result = await pool.query(
@@ -170,8 +203,12 @@ export function createWecomContactService({ pool }) {
     if (!/^\d{1,2}\/\d{1,2}$/.test(rawDate) || !/^\d{2}:\d{2}[–-]\d{2}:\d{2}$/.test(time)) {
       throw publicError(400, "课程日期或时间格式无效");
     }
+    const requestId = String(body.request_id || "").trim().replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+    const bookingId = requestId ? `hermes-booking-${requestId}` : `hermes-booking-${randomUUID()}`;
+    const existing = (Array.isArray(state.bookings) ? state.bookings : []).find((item) => item.id === bookingId);
+    if (existing) return { changed: false, member_id: memberId, booking: existing, idempotent_replay: true, sync: "课程已存在，未重复创建" };
     const booking = {
-      id: `hermes-booking-${randomUUID()}`,
+      id: bookingId,
       day,
       date: rawDate,
       time,
@@ -183,6 +220,34 @@ export function createWecomContactService({ pool }) {
     state.bookings = [...(Array.isArray(state.bookings) ? state.bookings : []), booking];
     await saveMemberState(memberId, state, coachUserId, "hermes_private_session_added", { booking });
     return { changed: true, member_id: memberId, booking, sync: "网站页面已自动同步" };
+  }
+
+  async function updatePrivateSession(body, coachUserId) {
+    const { memberId, state } = await loadBoundMemberState(body.member_id, coachUserId);
+    const sessionId = normalizeId(body.session_id, "session_id", 120);
+    const bookings = Array.isArray(state.bookings) ? state.bookings : [];
+    const booking = bookings.find((item) => item.id === sessionId);
+    if (!booking) throw publicError(404, "找不到该 session_id 对应的课程");
+    const next = { ...booking };
+    if (String(body.day || "").trim()) next.day = normalizeText(body.day, "星期", 10);
+    if (String(body.date || "").trim()) {
+      const date = normalizeText(body.date, "上课日期", 20);
+      if (!/^\d{1,2}\/\d{1,2}$/.test(date)) throw publicError(400, "课程日期格式无效");
+      next.date = date;
+    }
+    if (String(body.time || "").trim()) {
+      const time = normalizeText(body.time, "上课时间", 30);
+      if (!/^\d{2}:\d{2}[–-]\d{2}:\d{2}$/.test(time)) throw publicError(400, "课程时间格式无效");
+      next.time = time;
+    }
+    if (String(body.focus || "").trim()) next.focus = normalizeText(body.focus, "训练重点", 120);
+    if (String(body.status || "").trim()) {
+      if (!["已预约", "待确认", "已完成"].includes(String(body.status))) throw publicError(400, "课程状态无效");
+      next.status = String(body.status);
+    }
+    state.bookings = bookings.map((item) => item.id === sessionId ? next : item);
+    await saveMemberState(memberId, state, coachUserId, "hermes_private_session_updated", { session_id: sessionId, before: booking, after: next });
+    return { changed: true, member_id: memberId, booking: next, sync: "网站页面已自动同步" };
   }
 
   async function deletePrivateSession(body, coachUserId) {
@@ -267,6 +332,24 @@ export function createWecomContactService({ pool }) {
     state.profile = profile;
     await saveMemberState(memberId, state, coachUserId, "hermes_member_profile_updated", { profile });
     return { changed: true, member_id: memberId, profile, sync: "网站页面已自动同步" };
+  }
+
+  async function getMemberChangeHistory(rawMemberId, rawLimit, coachUserId) {
+    const { memberId } = await loadBoundMemberState(rawMemberId, coachUserId);
+    const limit = Math.min(50, Math.max(1, Number(rawLimit || 20)));
+    const result = await pool.query(
+      `SELECT action,detail,created_at
+       FROM audit_log
+       WHERE actor_id=$1 AND detail->>'member_id'=$2
+       ORDER BY created_at DESC
+       LIMIT $3`,
+      [coachUserId, memberId, limit],
+    );
+    return result.rows.map((row) => ({
+      action: row.action,
+      detail: row.detail,
+      created_at: row.created_at,
+    }));
   }
 
   async function listCustomerIds(coachUserId) {

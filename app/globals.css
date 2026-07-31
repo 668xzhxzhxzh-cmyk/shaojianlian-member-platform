@@ -68,15 +68,21 @@ small { color: var(--muted); }
 .notification-button.active { border-color: var(--green); color: var(--green); background: var(--green-soft); }
 .notification-button i { position: absolute; top: -2px; right: -2px; min-width: 17px; height: 17px; padding: 0 4px; display: grid; place-items: center; border-radius: 999px; background: var(--red); color: white; font: 10px/1 system-ui; font-style: normal; border: 2px solid var(--paper); }
 .notification-popover {
-  position: absolute; top: calc(100% + 13px); right: 0; width: min(370px,88vw); padding: 15px;
+  position: absolute; top: calc(100% + 13px); right: 0; width: min(390px,92vw); padding: 15px;
   background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 20px 55px rgba(42,48,34,.14);
 }
 .notification-popover > .row-between { padding: 2px 4px 10px; border-bottom: 1px solid var(--line); }
-.notification-popover > button:not(.text-button) { width: 100%; display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: transparent; padding: 12px 4px; }
-.notification-popover > button:last-child { border-bottom: 0; }
-.notification-popover > button:hover { background: #faf9f4; }
-.notification-popover > button > span { display: grid; }
-.notification-popover > button > em { color: var(--muted); font-size: 10px; font-style: normal; }
+.notification-popover > .row-between > span { display: grid; gap: 2px; }
+.notification-popover > .row-between small { color: var(--muted); font-size: 9px; font-weight: 400; }
+.notification-popover-list { max-height: 338px; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; scrollbar-gutter: stable; outline: 0; }
+.notification-popover-list::-webkit-scrollbar { width: 6px; }
+.notification-popover-list::-webkit-scrollbar-thumb { border-radius: 999px; background: #cfd3c8; }
+.notification-popover-list > button { width: 100%; display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: transparent; padding: 13px 4px; }
+.notification-popover-list > button:last-child { border-bottom: 0; }
+.notification-popover-list > button:hover, .notification-popover-list > button:focus-visible { background: #faf9f4; }
+.notification-popover-list > button.is-read { opacity: .62; }
+.notification-popover-list > button > span { display: grid; }
+.notification-popover-list > button > em { color: var(--muted); font-size: 10px; font-style: normal; }
 .profile-menu { position: relative; }
 .profile-trigger { border: 0; background: none; display: flex; align-items: center; gap: 9px; padding: 3px; border-radius: 12px; }
 .profile-trigger > span:not(.avatar) { display: grid; text-align: left; }
@@ -454,6 +460,9 @@ small { color: var(--muted); }
 
 .assistant-page { display: grid; gap: 16px; animation: rise .35s ease both; }
 .assistant-intro { padding-bottom: 0; }
+.assistant-scope-note { width: max-content; max-width: 100%; display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 13px; border: 1px solid #d5ddcc; border-radius: 10px; color: var(--green); background: var(--green-soft); }
+.assistant-scope-note > span { display: grid; }
+.assistant-scope-note small { color: var(--muted); font-size: 9px; }
 .assistant-grid { display: grid; grid-template-columns: minmax(280px,.7fr) minmax(560px,1.35fr) minmax(260px,.65fr); gap: 14px; align-items: start; }
 .chat-panel { display: flex; flex-direction: column; min-height: 780px; position: sticky; top: 90px; }
 .chat-heading, .chat-heading > div { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
@@ -678,6 +687,9 @@ button.table-row:hover { background: #faf9f4; }
 .sync-indicator span { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); animation: pulse 1s infinite; }
 
 .login-page { min-height: 100svh; display: grid; grid-template-columns: 1.15fr .85fr; background: var(--paper); }
+.login-page-single { grid-template-columns: 1fr; background: radial-gradient(circle at 50% 12%,#f7f7f1 0%,var(--paper) 48%,#ecece4 100%); }
+.login-page-single .login-form-panel { min-height: 100svh; padding: 28px 18px; }
+.login-page-single .login-form { width: min(470px,100%); }
 .login-brand-panel { min-height: 100%; display: flex; flex-direction: column; justify-content: space-between; gap: 50px; padding: clamp(32px,6vw,92px); color: white; background: linear-gradient(145deg,#26331f 0%,#435438 58%,#687457 100%); position: relative; overflow: hidden; }
 .coach-login-page .login-brand-panel { background: linear-gradient(145deg,#23301f 0%,#46583a 58%,#788263 100%); }
 .admin-login-page .login-brand-panel { background: linear-gradient(145deg,#172028 0%,#293943 56%,#52616a 100%); }
@@ -1044,9 +1056,7 @@ button.table-row:hover { background: #faf9f4; }
   .login-form-panel { padding: 18px 14px 35px; margin-top: -30px; position: relative; z-index: 2; }
   .login-form { padding: 24px 20px; }
   .management-login-page { min-height: 100dvh; align-content: start; }
-  .management-login-page .login-brand-panel { min-height: 112px; gap: 0; padding: 18px 20px; }
-  .management-login-page .login-brand-panel > div:nth-child(2), .management-login-page .login-trust { display: none; }
-  .management-login-page .login-form-panel { align-content: start; margin-top: 0; padding: 16px 12px 24px; }
+  .management-login-page .login-form-panel { min-height: 100dvh; align-content: center; margin-top: 0; padding: 16px 12px 24px; }
   .management-login-page .login-form { gap: 14px; padding: 20px 18px; }
   .portal-entry-links { grid-template-columns: 1fr; }
   .member-week-schedule { grid-template-columns: 1fr; }

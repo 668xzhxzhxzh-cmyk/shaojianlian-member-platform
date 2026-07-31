@@ -52,7 +52,7 @@ export function AssistantView({
     name: state.profile.name,
   };
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "你好，邵教练。我是平台 AI 助理。请选择准确的会员名称。除分析数据外，我可以协助增删课程、调整会员档案、训练方案、饮食方案与身体反馈，执行后网站会自动同步。", time: now() },
+    { role: "assistant", content: "你好，邵教练。我是 Hermes 执行型 AI 助理。请先从右侧选择会员，系统会固定唯一 member_id。你可以直接让我增删或调整私教课程、更新会员档案、训练方案、饮食方案和身体反馈，执行结果会自动同步网站。", time: now() },
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -161,14 +161,15 @@ export function AssistantView({
   return (
     <div className="assistant-page">
       <section className="page-intro assistant-intro">
-        <span className="eyebrow">AI 智能教练 · DeepSeek</span>
-        <h1>智能助理工作台</h1>
-        <p>通过精确会员名称选择唯一档案，让 AI 分析并协助管理课程、训练、饮食和身体反馈。</p>
+        <span className="eyebrow">Hermes Agent · DeepSeek V4 Flash</span>
+        <h1>Hermes 教练执行工作台</h1>
+        <p>这里是教练专用的对话与执行入口。先选择网站会员锁定唯一 member_id，再让 Hermes 实际增删课程、调整训练与饮食方案；管理端的“AI 建议管理”只负责审核，不是同一个页面。</p>
+        <div className="assistant-scope-note"><Bot size={20} /><span><b>教练端：对话并执行会员任务</b><small>管理端：审核建议、权限与发送合规</small></span></div>
       </section>
 
       <div className="assistant-grid">
         <Card className="chat-panel">
-          <div className="chat-heading"><div><MessageCircleMore size={20} /><b>与 AI 对话</b></div><button className={`icon-button ${historyOpen ? "active" : ""}`} onClick={() => setHistoryOpen((open) => !open)} aria-label="历史记录"><History size={18} /></button></div>
+          <div className="chat-heading"><div><MessageCircleMore size={20} /><b>与 Hermes 对话</b></div><button className={`icon-button ${historyOpen ? "active" : ""}`} onClick={() => setHistoryOpen((open) => !open)} aria-label="历史记录"><History size={18} /></button></div>
           {historyOpen ? <div className="chat-history"><b>最近对话</b><button onClick={() => { setHistoryOpen(false); notify("已打开今天 10:32 的恢复分析"); }}>今天 10:32 · 李明恢复分析</button><button onClick={() => { setHistoryOpen(false); notify("已打开 7 月 27 日的饮食复盘"); }}>7 月 27 日 · 饮食执行复盘</button></div> : null}
           <div className="chat-messages">
             {messages.map((message, index) => (
