@@ -22,6 +22,18 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm test
       - run: npm run build:node
+      - name: Package Linux production runtime
+        run: |
+          mkdir -p .next/standalone/.next
+          cp -R public .next/standalone/public
+          cp -R .next/static .next/standalone/.next/static
+          npm prune --omit=dev --ignore-scripts
+          tar -czf shao-production-linux.tar.gz .next/standalone node_modules
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shao-production-linux
+          path: shao-production-linux.tar.gz
+          retention-days: 3
       - run: cp .env.example .env
       - run: docker compose config
         env:

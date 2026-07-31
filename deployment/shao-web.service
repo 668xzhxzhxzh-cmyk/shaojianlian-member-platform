@@ -9,8 +9,10 @@ User=shaoapp
 Group=shaoapp
 WorkingDirectory=/opt/shao-coach
 Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3000
 EnvironmentFile=-/etc/default/shao-coach-web
-ExecStart=/usr/bin/npm run start:node -- --hostname 127.0.0.1 --port 3000
+ExecStart=/usr/bin/node /opt/shao-coach/.next/standalone/server.js
 Restart=always
 RestartSec=4
 TimeoutStopSec=20
