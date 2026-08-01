@@ -520,6 +520,14 @@ export function createWecomContactService({ pool }) {
       if (existingMemberId && existingMemberId !== locked.member_id) {
         throw publicError(409, "该企业微信客户已绑定其他 member_id");
       }
+      const memberBindingResult = await client.query(
+        "SELECT external_userid FROM member_wecom_bindings WHERE member_id=$1 FOR UPDATE",
+        [locked.member_id],
+      );
+      const currentExternalUserId = memberBindingResult.rows[0]?.external_userid;
+      if (currentExternalUserId && currentExternalUserId !== externalUserId) {
+        throw publicError(409, "该 member_id 已绑定其他企业微信客户，禁止扫码覆盖");
+      }
       await client.query(
         `INSERT INTO member_wecom_bindings
            (member_id,external_userid,coach_userid,status,updated_at)
@@ -586,6 +594,12 @@ export function createWecomContactService({ pool }) {
            status='active',
            updated_at=NOW()`,
       [memberId, externalUserId, coachUserId],
+    );
+    await pool.query(
+      `UPDATE wecom_binding_links
+       SET status='superseded',updated_at=NOW()
+       WHERE member_id=$1 AND coach_userid=$2 AND status='pending'`,
+      [memberId, coachUserId],
     );
     await auditOperation(coachUserId, "wecom_member_binding_verified", {
       member_id: memberId,

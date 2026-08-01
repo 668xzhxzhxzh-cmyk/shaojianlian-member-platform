@@ -343,6 +343,9 @@ test("member-specific contact QR automatically binds the official add-customer c
       if (text.includes("SELECT member_id FROM member_wecom_bindings WHERE external_userid")) {
         return { rows: binding.external_userid === params[0] ? [{ member_id: binding.member_id }] : [] };
       }
+      if (text.includes("SELECT external_userid FROM member_wecom_bindings WHERE member_id")) {
+        return { rows: binding.member_id === params[0] ? [{ external_userid: binding.external_userid }] : [] };
+      }
       if (text.includes("INSERT INTO member_wecom_bindings") && params.length === 3) {
         binding = { member_id: params[0], external_userid: params[1], coach_userid: params[2] };
         return { rows: [] };
