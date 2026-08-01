@@ -6,6 +6,7 @@ import pg from "pg";
 import { createWecomContactService } from "./wecom-contact.mjs";
 import { createWecomCallbackService } from "./wecom-callback.mjs";
 import { createWecomAppService } from "./wecom-app.mjs";
+import { compactWecomHermesReply, resolveWecomMemberContext } from "./wecom-agent.mjs";
 
 const { Pool } = pg;
 const port = Number(process.env.API_PORT || 8788);
@@ -76,7 +77,13 @@ const seedState = {
   ],
 };
 
-const hermesPrompt = `你是邵教练专属会员平台唯一的 Hermes 执行型管理智能体。你具备 shao-coach MCP 工具，可查询精确会员档案、列出教练名下 member_id、为精确 member_id 生成企业微信自动绑定二维码、增改删私教课程、更新训练方案、更新饮食方案、新增身体反馈、更新会员计划并核验变更历史。不要回答“没有这个工具”；应先检查可用 MCP 工具并选择最窄的一个执行。所有查询与修改必须使用精确 member_id，禁止按姓名或昵称猜测。会员扫描专属二维码添加教练后，企业微信官方回调会自动同步 external_userid，不需要人工绑定。删除课程前必须先查询并向教练确认精确 session_id；新增课程缺少日期、时间或训练重点时应先追问，使用稳定 request_id 避免重试造成重复课程。执行修改后再次查询或读取变更历史，并明确列出真实改变的字段；页面会自动同步，无需提示用户点击同步按钮。管理端的 AI 建议管理只是审核队列，不是你的对话入口。客户消息仍必须先创建草稿并由教练确认；不要声称已经发送或会员已收到。不做医疗诊断；持续疼痛、夜间痛、眩晕或胸闷应建议暂停训练并咨询合格医务人员。`;
+const hermesPrompt = `你是邵教练专属会员平台唯一的 Hermes 执行型管理智能体，具备 shao-coach MCP 工具。企业微信回复必须简洁、自然、可执行：不要寒暄，不解释平台规则，不罗列能力或候选操作，通常只回复 1 至 3 个短句且不超过 120 个汉字。
+
+会员身份只能使用已经验证的精确 member_id。系统上下文若说明会员已由有效绑定关系唯一解析，就必须直接使用其中的 member_id；这不是昵称猜测，绝不要再次要求教练确认会员或重发 member_id。没有唯一解析结果时，只问一次精确 member_id，不输出冗长说明。
+
+新增课程、调整课程、训练方案、饮食方案、身体反馈和会员计划属于教练已授权的日常管理：所需参数齐全时立即调用最窄的 MCP 工具执行，不要先复述，不要再问“是否确认”。“添加/加一节/安排/排一节 + 日期时间 + 课程内容”必须按新增课程执行，不得误解为提醒会员、创建消息或待办；当前完整指令本身就是执行授权。调用 add_private_session 时把日期规范为 M/D、时间规范为 HH:MM–HH:MM，并使用由 member_id、日期和开始时间组成的稳定 request_id，执行后核验一次。成功只回复类似：已为🐻🐻君添加 8月4日 18:00–19:00 训练放松课，网站已同步。
+
+仅两类操作必须二次确认：删除课程，以及创建企业微信客户发送任务。删除前查询精确 session_id；客户消息先创建草稿并要求“确认发送 task_id=...”。未获得真实发送状态前不得说会员已收到。缺少日期、时间或课程内容时只追问缺失项。不要回答“没有这个工具”，应先检查可用 MCP 工具。不做医疗诊断。`;
 
 await initializeDatabase();
 const wecomContact = createWecomContactService({ pool });
@@ -627,14 +634,15 @@ async function handleWecomCoachMessage(message) {
     const reply = message.msgType === "text" && message.content
       ? await requestHermesWecomReply(message)
       : "目前仅支持文字指令。请发送包含精确 member_id 的文字任务。";
-    await wecomApp.sendText({ toUserId: coachUserId, content: reply });
+    const compactReply = compactWecomHermesReply(reply);
+    await wecomApp.sendText({ toUserId: coachUserId, content: compactReply });
     await pool.query(
       "UPDATE wecom_callback_messages SET status='replied',updated_at=NOW() WHERE dedupe_key=$1",
       [dedupeKey],
     );
     await audit(coachUserId, "wecom_callback_replied", {
       msgId: message.msgId,
-      replyLength: reply.length,
+      replyLength: compactReply.length,
     });
   } catch (error) {
     const safeMessage = error instanceof Error ? error.message.slice(0, 400) : "企业微信消息处理失败";
@@ -658,22 +666,13 @@ async function requestHermesWecomReply(message) {
   }
 
   const content = String(message.content || "").trim().slice(0, 4000);
-  const memberMatch = content.match(/\bmember_id\s*[=:：]\s*([A-Za-z0-9][A-Za-z0-9_-]{0,127})/i);
-  let memberContext = "本条指令未提供 member_id；只有列出当前教练会员等无需指定会员的操作可以继续，其他操作必须先要求教练提供精确 member_id，禁止按姓名或昵称猜测。";
-  if (memberMatch) {
-    const memberId = memberMatch[1];
-    const result = await pool.query(
-      `SELECT u.id,u.name,u.status,p.state_json
-       FROM users u
-       JOIN member_wecom_bindings b ON b.member_id=u.id AND b.status='active'
-       LEFT JOIN portal_state p ON p.user_id=u.id
-       WHERE u.id=$1 AND u.role='member' AND u.status='active' AND b.coach_userid=$2
-       LIMIT 1`,
-      [memberId, message.fromUserName],
-    );
-    if (!result.rows[0]) return `找不到 member_id=${memberId}，或该会员未绑定给当前教练。请核对精确 member_id。`;
-    memberContext = `当前操作对象是精确 member_id=${memberId}，且已验证绑定给当前教练。网站最新会员数据：${JSON.stringify(result.rows[0].state_json || {}).slice(0, 18000)}`;
-  }
+  const resolvedMember = await resolveWecomMemberContext({
+    pool,
+    coachUserId: message.fromUserName,
+    content,
+  });
+  if (resolvedMember.error) return resolvedMember.error;
+  const memberContext = resolvedMember.context;
 
   const upstream = await fetch(new URL("/v1/chat/completions", hermesApi), {
     method: "POST",
