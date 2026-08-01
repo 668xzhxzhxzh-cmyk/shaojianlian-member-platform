@@ -6,7 +6,7 @@ const TOKEN_ERROR_CODES = new Set([40014, 42001]);
 
 export function createWecomContactService({ pool }) {
   const corpId = String(process.env.WECOM_CORP_ID || "").trim();
-  const contactSecret = String(process.env.WECOM_CONTACT_SECRET || "").trim();
+  const contactSecret = String(process.env.WECOM_CONTACT_SECRET || process.env.WECOM_APP_SECRET || "").trim();
   const toolToken = String(process.env.HERMES_TOOL_TOKEN || "").trim();
   const allowedCoachUserIds = new Set(
     String(process.env.WECOM_ALLOWED_COACH_USERIDS || "")

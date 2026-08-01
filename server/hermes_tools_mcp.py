@@ -49,7 +49,7 @@ mcp = FastMCP(
 def _verified_coach_userid() -> str:
     """Return the single server-configured coach identity.
 
-    The WeCom adapter rejects non-allowlisted senders before Hermes runs. The
+    The self-built app callback rejects non-allowlisted senders before Hermes runs. The
     MCP process independently binds every operation to the same server-side
     allowlist, so a model or chat message can never choose another coach.
     """

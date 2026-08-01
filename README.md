@@ -1,14 +1,14 @@
 # 邵教练专属会员平台
 
-面向鄂州私教业务的完整会员服务平台。生产链路由响应式网站、PostgreSQL、一个原生 Hermes 实例、DeepSeek V4 Flash、企业微信智能机器人和企业微信客户联系官方接口组成。
+面向鄂州私教业务的完整会员服务平台。生产链路由响应式网站、PostgreSQL、一个原生 Hermes 实例、DeepSeek V4 Flash、企业微信自建应用和企业微信客户联系官方接口组成。
 
 ## 已实现
 
 - 会员端：首页使用中国内地手机号自助注册并自动登录；训练计划、训练计时、饮食饮水、连续打卡、身体指标、教练排期查看与会员权益。
 - 教练端：会员健康概览、课程排期增删、训练/饮食方案、身体反馈、Hermes 管理与发送任务状态。
 - 管理端：用户角色、运营指标、服务与集成状态、安全和备案提示。
-- 智能体：网站与企业微信 AI Bot 共用现有 Hermes；Hermes 使用 `deepseek-v4-flash`，不安装第二个实例。
-- 企业微信入口：教练在“AI健身助理”单聊，或在授权内部群中 `@AI健身助理`。机器人通过 Hermes 原生 WeCom WebSocket 适配器连接 `wss://openws.work.weixin.qq.com`，无需普通群 Webhook。
+- 智能体：网站、Hermes Desktop 与企业微信自建应用共用现有 Hermes；Hermes 使用 `deepseek-v4-flash`，不安装第二个实例。
+- 企业微信入口：教练只在可见范围受限的自建应用中发送文字指令。网站验证企业微信 SHA-1 签名并完成 AES-256-CBC 解密后，才把白名单教练的指令交给 Hermes。
 - 会员工具：只允许企业微信白名单教练调用；按精确 `member_id` 查询，不按昵称、姓名或头像猜测；网站保存 `member_id`、`external_userid`、`coach_userid` 绑定。
 - 客户触达：Hermes 只创建企业微信客户联系发送任务。教练先在机器人会话确认草稿，再到企业微信客户端完成官方最终确认。
 - 状态语义：创建任务后固定提示“发送任务已创建，请在企业微信客户端确认发送。”；企业微信报告已执行发送也不会被表述为“会员已收到”。
@@ -20,8 +20,9 @@
 ## 通信架构
 
 ```text
-教练企业微信：单聊 / 授权群 @“AI健身助理”
-  → 企业微信智能机器人 AI Bot（官方 WebSocket/API 模式）
+教练企业微信自建应用
+  → HTTPS 回调签名验证与 AES 解密
+  → 企业微信 userid 白名单
   → 现有 Hermes（唯一实例）
   → DeepSeek V4 Flash
   → 网站回环内部 API
@@ -52,29 +53,25 @@ npm run dev
 - `HERMES_TOOL_TOKEN`：网站与 Hermes MCP 共享的独立强令牌，至少 32 字节。
 - `WECOM_ALLOWED_COACH_USERIDS`：唯一或逗号分隔的授权教练企业微信 userid。
 - `WECOM_CORP_ID`：企业 ID。
-- `WECOM_CONTACT_SECRET`：被配置为“客户联系可调用接口的应用”的 Secret。
+- `WECOM_APP_AGENT_ID`、`WECOM_APP_SECRET`：唯一教练自建应用的 AgentID 与 Secret。
+- `WECOM_CALLBACK_TOKEN`、`WECOM_CALLBACK_AES_KEY`：接收消息服务器配置中的 Token 与 EncodingAESKey。
+- `WECOM_CONTACT_SECRET`：客户联系 API 凭据；留空时复用已被加入“客户联系可调用应用”的 `WECOM_APP_SECRET`。
 - `SESSION_SECRET`、`DATABASE_URL`/PostgreSQL 变量及三种角色初始账号。
 
 Hermes `/var/lib/hermes/.hermes/.env`：
 
 - `DEEPSEEK_API_KEY`、`API_SERVER_KEY`：保留现有值。
-- `WECOM_BOT_ID`、`WECOM_SECRET`：扫码创建“AI健身助理”后得到的 AI Bot 凭据。
-- `WECOM_DM_POLICY=allowlist`
-- `WECOM_ALLOWED_USERS=<教练userid>`
-- `WECOM_GROUP_POLICY=allowlist`
 - `HERMES_TOOL_TOKEN=<与网站相同的独立强令牌>`
 
 真实密钥只能保存在服务器环境文件中，不能提交到 GitHub。
 
-## 企业微信 AI Bot 配置
+## 企业微信自建应用配置
 
-当前生产 Hermes `v0.19.0` 已原生支持企业微信 AI Bot WebSocket/API 模式：
-
-- 入站、出站和群内回复均由 Hermes `wecom` 适配器处理。
-- AI Bot 需要 `Bot ID` 与 `Secret`，不需要公网回调地址、EncodingAESKey、普通群 Webhook 或独立服务进程。
-- 私聊按教练 userid 白名单放行。
-- 群聊同时按授权群 chatid 与教练 userid 放行。
-- 企业微信适配器先按真实发送者 userid 白名单拦截；会员工具再在服务器端绑定唯一授权教练 userid，聊天正文和模型都不能指定或替换身份。
+- 接收消息地址固定为 `https://<备案域名>/api/wecom/callback`。企业微信保存配置时，服务端校验 `msg_signature` 并解密 `echostr` 原样返回。
+- POST 回调同样先验签、AES 解密，再按真实 `FromUserName` 与 `WECOM_ALLOWED_COACH_USERIDS` 白名单放行。
+- 回调 `MsgId` 会写入去重表；企业微信重试不会重复执行 Hermes 管理操作。
+- Hermes 的回复通过自建应用官方 `message/send` 接口回到同一个教练 userid；企业微信客户和未授权成员不会进入 Hermes。
+- 中国内地正式配置必须使用与企业主体匹配且已备案的域名；公网 IP 是随后配置的企业可信 IP，不能代替接收消息域名。
 
 部署工具：
 
@@ -82,20 +79,12 @@ Hermes `/var/lib/hermes/.hermes/.env`：
 sudo sh scripts/install-hermes-wecom-tools.sh /opt/shao-coach
 ```
 
-然后把 `deployment/hermes-wecom-mcp.example.yaml` 合并到 Hermes `config.yaml`，将同一个 MCP 启用到 `wecom`、网站使用的 `api_server` 和 Hermes Desktop 使用的 `cli` 平台，并验证：
+然后把 `deployment/hermes-wecom-mcp.example.yaml` 合并到 Hermes `config.yaml`，将同一个 MCP 启用到网站使用的 `api_server` 和 Hermes Desktop 使用的 `cli` 平台，并验证：
 
 ```bash
 sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes mcp test shao-coach
 sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes tools --summary
 ```
-
-目标群第一次 `@AI健身助理` 后，从 WeCom 会话元数据读取真实 chatid，并立即锁定为唯一授权群：
-
-```bash
-sudo /usr/local/sbin/shao-wecom-lock-group <chatid>
-```
-
-锁定脚本会同时设置群 chatid 白名单和群内教练 userid 白名单，原子保存配置，备份旧文件并验证同一个 Hermes 网关重启成功。
 
 ## 企业微信客户联系凭据
 
@@ -116,7 +105,7 @@ sudo /usr/local/sbin/shao-wecom-contact-config
 
 ## 教练操作流程
 
-1. 教练向“AI健身助理”发送：`查询会员 member_id=...`。
+1. 教练在唯一自建应用中发送：`查询会员 member_id=...`。
 2. Hermes 用当前真实 `coach_userid` 调用精确查询工具。
 3. 如需触达会员，Hermes 生成草稿并返回 `task_id`。
 4. 教练回复：`确认发送 task_id=<task_id>`。

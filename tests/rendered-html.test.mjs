@@ -14,23 +14,28 @@ test("builds the member portal without starter artifacts", async () => {
   assert.doesNotMatch(`${page}${portal}${packageJson}`, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
-test("includes coach approval, native agent and WeCom AI Bot tooling", async () => {
-  const [coach, admin, assistant, envExample, tools, contact] = await Promise.all([
+test("includes coach approval, native agent and WeCom self-built app tooling", async () => {
+  const [coach, admin, assistant, envExample, tools, contact, callback, app] = await Promise.all([
     readFile(new URL("../components/coach-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/assistant-view.tsx", import.meta.url), "utf8"),
     readFile(new URL("../.env.example", import.meta.url), "utf8"),
     readFile(new URL("../server/hermes_tools_mcp.py", import.meta.url), "utf8"),
     readFile(new URL("../server/wecom-contact.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../server/wecom-callback.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../server/wecom-app.mjs", import.meta.url), "utf8"),
   ]);
   assert.match(coach, /会员档案/);
   assert.match(coach, /训练方案设计/);
   assert.match(assistant, /Hermes Agent/);
   assert.match(envExample, /DEEPSEEK_MODEL=deepseek-v4-flash/);
-  assert.match(admin, /企业微信 AI 助理/);
+  assert.match(admin, /企业微信自建应用/);
   assert.match(tools, /get_member_by_id/);
   assert.match(contact, /externalcontact\/add_msg_template/);
   assert.match(contact, /发送任务已创建，请在企业微信客户端确认发送。/);
+  assert.match(callback, /verifySignature/);
+  assert.match(callback, /decryptPayload/);
+  assert.match(app, /cgi-bin\/message\/send/);
   assert.doesNotMatch(`${assistant}${contact}`, /notifications\/weixin|WECOM_WEBHOOK_URL/);
 });
 

@@ -8,7 +8,7 @@ mcp_servers:
     env:
       SHAO_INTERNAL_API_URL: http://127.0.0.1:8788/api/internal/hermes/tools
       SHAO_HERMES_TOOL_TOKEN: ${env:HERMES_TOOL_TOKEN}
-      WECOM_ALLOWED_COACH_USERIDS: ${env:WECOM_ALLOWED_USERS}
+      WECOM_ALLOWED_COACH_USERIDS: ${env:WECOM_ALLOWED_COACH_USERIDS}
     enabled: true
     tools:
       include:
@@ -28,30 +28,10 @@ mcp_servers:
         - confirm_customer_send_task
         - get_customer_send_task_status
 
-# 同一个 MCP 对教练企业微信、网站 Hermes 对话和 Hermes Desktop 开放。
+# 同一个 MCP 对企业微信自建应用回调、网站 Hermes 对话和 Hermes Desktop 开放。
 # 三个入口都由服务器固定唯一教练身份，会员修改仍必须使用精确 member_id。
 platform_toolsets:
-  wecom:
-    - shao-coach
   api_server:
     - shao-coach
   cli:
     - shao-coach
-
-# 最终生产策略：私聊只允许唯一教练；群聊同时校验精确 chatid 和教练 userid。
-# 第一次在目标群 @ 机器人后，从 Hermes 会话元数据取得 chatid，再运行：
-# sudo /usr/local/sbin/shao-wecom-lock-group <chatid>
-platforms:
-  wecom:
-    enabled: true
-    extra:
-      dm_policy: allowlist
-      allow_from:
-        - REPLACE_WITH_COACH_USERID
-      group_policy: allowlist
-      group_allow_from:
-        - REPLACE_WITH_AUTHORIZED_GROUP_CHATID
-      groups:
-        REPLACE_WITH_AUTHORIZED_GROUP_CHATID:
-          allow_from:
-            - REPLACE_WITH_COACH_USERID
