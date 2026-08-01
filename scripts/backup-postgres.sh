@@ -26,5 +26,7 @@ if [ ! -s "$output" ]; then
   exit 1
 fi
 
-find "$backup_dir" -type f -name 'shao-platform-*.sql.gz' -mtime +14 -delete
+# 备份目录也可能保存由 root 创建的配置归档。这里只清理本脚本在
+# 目录顶层生成的数据库备份，既避免越权遍历，也不会误删其他归档。
+find "$backup_dir" -maxdepth 1 -type f -name 'shao-platform-*.sql.gz' -mtime +14 -delete
 echo "$output"
