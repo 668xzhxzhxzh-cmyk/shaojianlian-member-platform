@@ -1,9 +1,11 @@
 import { createServer } from "node:http";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import pg from "pg";
 import { createWecomContactService } from "./wecom-contact.mjs";
+import { createWecomCallbackService } from "./wecom-callback.mjs";
+import { createWecomAppService } from "./wecom-app.mjs";
 
 const { Pool } = pg;
 const port = Number(process.env.API_PORT || 8788);
@@ -78,6 +80,12 @@ const hermesPrompt = `你是邵教练专属会员平台唯一的 Hermes 执行�
 
 await initializeDatabase();
 const wecomContact = createWecomContactService({ pool });
+const wecomApp = createWecomAppService();
+const wecomCallback = createWecomCallbackService({
+  onMessage: async (message) => {
+    await handleWecomCoachMessage(message);
+  },
+});
 
 const server = createServer(async (request, response) => {
   setSecurityHeaders(response);
@@ -93,9 +101,19 @@ const server = createServer(async (request, response) => {
         deepseek: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
         hermes: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
         wecomContact: wecomContact.contactConfigured,
+        wecomCallback: wecomCallback.callbackConfigured,
+        wecomApp: wecomApp.appConfigured,
         hermesMemberTools: wecomContact.toolsConfigured,
       },
     });
+    if (url.pathname === "/api/wecom/callback") {
+      return wecomCallback.handle(request, response, url).catch((error) => {
+        const status = Number(error?.statusCode || 500);
+        return json(response, status, {
+          error: status < 500 ? error.message : "企业微信回调暂时不可用",
+        });
+      });
+    }
     if (url.pathname === "/api/internal/hermes/tools" && request.method === "POST") {
       return wecomContact.handleInternalTool(request, response).catch((error) => {
         const status = Number(error?.statusCode || 500);
@@ -178,10 +196,21 @@ async function initializeDatabase() {
       confirmed_at TIMESTAMPTZ,
       provider_updated_at TIMESTAMPTZ
     );
+    CREATE TABLE IF NOT EXISTS wecom_callback_messages (
+      dedupe_key TEXT PRIMARY KEY,
+      msg_id TEXT,
+      coach_userid TEXT NOT NULL,
+      msg_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'processing',
+      error_message TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE INDEX IF NOT EXISTS audit_log_actor_date_idx ON audit_log(actor_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS notifications_status_date_idx ON notifications(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS member_wecom_bindings_coach_idx ON member_wecom_bindings(coach_userid, status);
     CREATE INDEX IF NOT EXISTS wecom_send_tasks_coach_status_idx ON wecom_send_tasks(coach_userid, status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS wecom_callback_messages_coach_date_idx ON wecom_callback_messages(coach_userid, created_at DESC);
   `);
   const accounts = [
     ["member-li", process.env.MEMBER_PHONE || "13800005206", "李明", "member", process.env.MEMBER_PASSWORD || "Member@2026"],
@@ -509,6 +538,130 @@ async function handleHermes(request, response, session) {
   }
   response.end();
   await audit(session.id, "hermes_chat", { memberId, messageCount: messages.length });
+}
+
+async function handleWecomCoachMessage(message) {
+  const coachUserId = String(message.fromUserName || "").trim();
+  const dedupeKey = String(message.msgId || "").trim() || createHash("sha256")
+    .update([coachUserId, message.createTime, message.msgType, message.event, message.content].join("\u0000"), "utf8")
+    .digest("hex");
+  const claimed = await pool.query(
+    `INSERT INTO wecom_callback_messages (dedupe_key,msg_id,coach_userid,msg_type,status)
+     VALUES ($1,$2,$3,$4,'processing')
+     ON CONFLICT (dedupe_key) DO UPDATE SET status='processing',error_message=NULL,updated_at=NOW()
+     WHERE wecom_callback_messages.status='failed'
+     RETURNING dedupe_key`,
+    [dedupeKey, String(message.msgId || "") || null, coachUserId, String(message.msgType || "unknown")],
+  );
+  if (!claimed.rows[0]) return;
+
+  await audit(coachUserId, "wecom_callback_received", {
+    msgType: message.msgType,
+    event: message.event,
+    agentId: message.agentId,
+    msgId: message.msgId,
+    contentLength: message.content.length,
+  });
+
+  try {
+    const reply = message.msgType === "text" && message.content
+      ? await requestHermesWecomReply(message)
+      : "目前仅支持文字指令。请发送包含精确 member_id 的文字任务。";
+    await wecomApp.sendText({ toUserId: coachUserId, content: reply });
+    await pool.query(
+      "UPDATE wecom_callback_messages SET status='replied',updated_at=NOW() WHERE dedupe_key=$1",
+      [dedupeKey],
+    );
+    await audit(coachUserId, "wecom_callback_replied", {
+      msgId: message.msgId,
+      replyLength: reply.length,
+    });
+  } catch (error) {
+    const safeMessage = error instanceof Error ? error.message.slice(0, 400) : "企业微信消息处理失败";
+    await pool.query(
+      "UPDATE wecom_callback_messages SET status='failed',error_message=$2,updated_at=NOW() WHERE dedupe_key=$1",
+      [dedupeKey, safeMessage],
+    );
+    await audit(coachUserId, "wecom_callback_failed", { msgId: message.msgId, error: safeMessage });
+    throw error;
+  }
+}
+
+async function requestHermesWecomReply(message) {
+  if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) {
+    throw new Error("Hermes API 尚未配置");
+  }
+  const hermesApi = new URL(process.env.HERMES_API_URL);
+  const allowedHosts = new Set(["127.0.0.1", "localhost", "host.docker.internal"]);
+  if (!["http:", "https:"].includes(hermesApi.protocol) || !allowedHosts.has(hermesApi.hostname)) {
+    throw new Error("Hermes API 必须使用服务器私有回环地址");
+  }
+
+  const content = String(message.content || "").trim().slice(0, 4000);
+  const memberMatch = content.match(/\bmember_id\s*[=:：]\s*([A-Za-z0-9][A-Za-z0-9_-]{0,127})/i);
+  let memberContext = "本条指令未提供 member_id；只有列出当前教练会员等无需指定会员的操作可以继续，其他操作必须先要求教练提供精确 member_id，禁止按姓名或昵称猜测。";
+  if (memberMatch) {
+    const memberId = memberMatch[1];
+    const result = await pool.query(
+      `SELECT u.id,u.name,u.status,p.state_json
+       FROM users u
+       JOIN member_wecom_bindings b ON b.member_id=u.id AND b.status='active'
+       LEFT JOIN portal_state p ON p.user_id=u.id
+       WHERE u.id=$1 AND u.role='member' AND u.status='active' AND b.coach_userid=$2
+       LIMIT 1`,
+      [memberId, message.fromUserName],
+    );
+    if (!result.rows[0]) return `找不到 member_id=${memberId}，或该会员未绑定给当前教练。请核对精确 member_id。`;
+    memberContext = `当前操作对象是精确 member_id=${memberId}，且已验证绑定给当前教练。网站最新会员数据：${JSON.stringify(result.rows[0].state_json || {}).slice(0, 18000)}`;
+  }
+
+  const upstream = await fetch(new URL("/v1/chat/completions", hermesApi), {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${process.env.HERMES_API_KEY}`,
+      "content-type": "application/json",
+      "x-hermes-session-key": `shao-wecom-app:${message.fromUserName}`,
+    },
+    body: JSON.stringify({
+      model: "hermes-agent",
+      stream: true,
+      messages: [
+        { role: "system", content: hermesPrompt },
+        { role: "system", content: `当前请求来自已通过企业微信签名、AES 解密和 userid 白名单验证的自建应用教练 userid=${message.fromUserName}。${memberContext}` },
+        { role: "user", content },
+      ],
+    }),
+    signal: AbortSignal.timeout(120000),
+  });
+  if (!upstream.ok || !upstream.body) throw new Error(`Hermes API 暂时不可用（status=${upstream.status}）`);
+
+  const reply = await collectHermesReply(upstream.body);
+  if (!reply.trim()) throw new Error("Hermes 未返回文字结果");
+  return reply.trim();
+}
+
+async function collectHermesReply(body) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let reply = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      try {
+        const delta = JSON.parse(data).choices?.[0]?.delta?.content;
+        if (delta) reply += delta;
+      } catch {}
+    }
+  }
+  return reply;
 }
 
 async function updateUser(request, response, session) {

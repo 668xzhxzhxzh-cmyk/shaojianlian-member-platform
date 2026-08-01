@@ -158,6 +158,8 @@ type IntegrationHealth = {
   deepseek: boolean | null;
   memberTools: boolean | null;
   wecomContact: boolean | null;
+  wecomCallback: boolean | null;
+  wecomApp: boolean | null;
 };
 
 function IntegrationBadge({ value, ready, unavailable }: { value: boolean | null; ready: string; unavailable: string }) {
@@ -184,7 +186,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
     { id: "n3", title: "会员身体数据已更新", detail: "张伟新增体重与体脂记录", read: true },
   ]);
   const [settings, setSettings] = useState({ city: "鄂州", timezone: "Asia/Shanghai", hermesAutoSync: true, memberRegistration: true });
-  const [integrationHealth, setIntegrationHealth] = useState<IntegrationHealth>({ deepseek: null, memberTools: null, wecomContact: null });
+  const [integrationHealth, setIntegrationHealth] = useState<IntegrationHealth>({ deepseek: null, memberTools: null, wecomContact: null, wecomCallback: null, wecomApp: null });
   const visibleUsers = users.filter((user) => !search || `${user.name}${user.role}${user.phone}${user.status}`.includes(search));
   const integrationValues = Object.values(integrationHealth);
   const healthyIntegrationCount = integrationValues.filter((value) => value === true).length;
@@ -212,17 +214,19 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
       .then(async (response) => {
         if (!response.ok) throw new Error("health unavailable");
         const result = await response.json() as {
-          integrations?: { deepseek?: boolean; hermesMemberTools?: boolean; wecomContact?: boolean };
+          integrations?: { deepseek?: boolean; hermesMemberTools?: boolean; wecomContact?: boolean; wecomCallback?: boolean; wecomApp?: boolean };
         };
         setIntegrationHealth({
           deepseek: Boolean(result.integrations?.deepseek),
           memberTools: Boolean(result.integrations?.hermesMemberTools),
           wecomContact: Boolean(result.integrations?.wecomContact),
+          wecomCallback: Boolean(result.integrations?.wecomCallback),
+          wecomApp: Boolean(result.integrations?.wecomApp),
         });
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setIntegrationHealth({ deepseek: false, memberTools: false, wecomContact: false });
+        setIntegrationHealth({ deepseek: false, memberTools: false, wecomContact: false, wecomCallback: false, wecomApp: false });
       });
     return () => controller.abort();
   }, []);
@@ -363,7 +367,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
               action={(
                 <span className={`integration-overall${integrationHealthPending ? " pending" : integrationHealthDegraded ? " warning" : ""}`}>
                   <i />
-                  {integrationHealthPending ? "正在检测生产服务" : `${healthyIntegrationCount}/3 项服务正常`}
+                  {integrationHealthPending ? "正在检测生产服务" : `${healthyIntegrationCount}/5 项服务正常`}
                 </span>
               )}
             />
@@ -382,6 +386,16 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
                 <span className="integration-icon"><MessageCircleMore size={21} /></span>
                 <span><b>企业微信</b><small>官方客户联系接口</small></span>
                 <IntegrationBadge value={integrationHealth.wecomContact} ready="已接入" unavailable="待配置" /><ArrowRight size={16} />
+              </button>
+              <button onClick={() => showIntegrationStatus("企业微信接收消息回调", integrationHealth.wecomCallback)}>
+                <span className="integration-icon"><ShieldCheck size={21} /></span>
+                <span><b>消息回调</b><small>签名验证与 AES 解密</small></span>
+                <IntegrationBadge value={integrationHealth.wecomCallback} ready="已验证" unavailable="待配置" /><ArrowRight size={16} />
+              </button>
+              <button onClick={() => showIntegrationStatus("企业微信自建应用消息", integrationHealth.wecomApp)}>
+                <span className="integration-icon"><MessageCircleMore size={21} /></span>
+                <span><b>教练操作入口</b><small>自建应用官方消息接口</small></span>
+                <IntegrationBadge value={integrationHealth.wecomApp} ready="已接入" unavailable="待配置" /><ArrowRight size={16} />
               </button>
             </div>
             <p className="integration-footnote"><ShieldCheck size={16} /> 所有管理操作均记录审计日志，会员消息仍需教练确认发送。</p>
@@ -439,7 +453,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
       <div className="admin-grid">
         <Card className="span-2">
           <SectionTitle title="平台运行状态" />
-          <div className="service-grid"><Service icon={Cloud} name="网站服务" detail="鄂州业务站运行正常" /><Service icon={Database} name="业务数据库" detail="PostgreSQL 持久化正常" /><Service icon={Bot} name="AI 分析服务" detail="DeepSeek V4 Flash 已接入" /><Service icon={MessageCircleMore} name="企业微信 AI 助理" detail="官方长连接通道 · 已配置" /></div>
+          <div className="service-grid"><Service icon={Cloud} name="网站服务" detail="鄂州业务站运行正常" /><Service icon={Database} name="业务数据库" detail="PostgreSQL 持久化正常" /><Service icon={Bot} name="AI 分析服务" detail="DeepSeek V4 Flash 已接入" /><Service icon={MessageCircleMore} name="企业微信自建应用" detail={integrationHealth.wecomCallback && integrationHealth.wecomApp ? "官方回调与应用消息 · 已接入" : "官方回调与应用消息 · 待配置"} /></div>
         </Card>
         <Card>
           <SectionTitle title="安全与合规" />
@@ -455,7 +469,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
           <SectionTitle title="集成设置" />
           <div className="integration-list">
             <button onClick={() => notify("DeepSeek 连接测试已提交")}><span><Sparkles size={20} /><b>DeepSeek API</b></span><em className="ok">已接入</em><ArrowRight size={16} /></button>
-            <button onClick={() => notify("企业微信 AI Bot 已就绪，扫码创建后即可启用", "info")}><span><MessageCircleMore size={20} /><b>AI健身助理</b></span><em>待扫码</em><ArrowRight size={16} /></button>
+            <button onClick={() => showIntegrationStatus("企业微信自建应用", Boolean(integrationHealth.wecomCallback && integrationHealth.wecomApp))}><span><MessageCircleMore size={20} /><b>教练自建应用</b></span><em className={integrationHealth.wecomCallback && integrationHealth.wecomApp ? "ok" : ""}>{integrationHealth.wecomCallback && integrationHealth.wecomApp ? "已接入" : "待配置"}</em><ArrowRight size={16} /></button>
             <button onClick={() => notify("备份任务状态正常；最近一次恢复演练待执行", "info")}><span><Database size={20} /><b>数据备份</b></span><em className="ok">正常</em><ArrowRight size={16} /></button>
           </div>
         </Card>
