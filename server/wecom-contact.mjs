@@ -343,7 +343,7 @@ export function createWecomContactService({ pool }) {
        WHERE actor_id=$1 AND detail->>'member_id'=$2
        ORDER BY created_at DESC
        LIMIT $3`,
-      [coachUserId, memberId, limit],
+      [`wecom:${coachUserId}`, memberId, limit],
     );
     return result.rows.map((row) => ({
       action: row.action,
