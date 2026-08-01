@@ -13,15 +13,29 @@ mcp_servers:
     tools:
       include:
         - get_member_by_id
+        - list_members
+        - add_private_session
+        - update_private_session
+        - delete_private_session
+        - update_training_plan
+        - update_nutrition_plan
+        - add_body_feedback
+        - update_member_profile
+        - get_member_change_history
         - list_customer_ids
         - bind_member_external_userid
         - create_member_message_draft
         - confirm_customer_send_task
         - get_customer_send_task_status
 
-# MCP 只对企业微信 AI Bot 开放。网站 API、CLI 和其他平台不加载会员管理工具。
+# 同一个 MCP 对教练企业微信、网站 Hermes 对话和 Hermes Desktop 开放。
+# 三个入口都由服务器固定唯一教练身份，会员修改仍必须使用精确 member_id。
 platform_toolsets:
   wecom:
+    - shao-coach
+  api_server:
+    - shao-coach
+  cli:
     - shao-coach
 
 # 最终生产策略：私聊只允许唯一教练；群聊同时校验精确 chatid 和教练 userid。

@@ -8,11 +8,11 @@ Requires=postgresql.service
 Type=simple
 User=shaoapp
 Group=shaoapp
-WorkingDirectory=/opt/shao-coach
+WorkingDirectory=/opt/shao-coach/current
 EnvironmentFile=/opt/shao-coach/.env
 Environment=NODE_ENV=production
 Environment=API_HOST=127.0.0.1
-ExecStart=/usr/bin/node /opt/shao-coach/server/index.mjs
+ExecStart=/usr/bin/node /opt/shao-coach/current/server/index.mjs
 Restart=always
 RestartSec=4
 TimeoutStopSec=20

@@ -105,6 +105,186 @@ def get_member_by_id(member_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def list_members() -> dict[str, Any]:
+    """列出当前教练已绑定会员的精确 member_id、姓名和状态。
+
+    此工具只用于让教练选择明确的 member_id；不得按姓名自动执行修改。
+    """
+
+    return _call("list_members")
+
+
+@mcp.tool()
+def add_private_session(
+    member_id: str,
+    day: str,
+    date: str,
+    time: str,
+    focus: str,
+    status: str = "已预约",
+    request_id: str = "",
+) -> dict[str, Any]:
+    """为精确 member_id 新增一节一对一私教并立即同步网站。
+
+    date 使用 M/D，time 使用 HH:MM–HH:MM。禁止创建团体课。
+    """
+
+    return _call(
+        "add_private_session",
+        member_id=member_id,
+        day=day,
+        date=date,
+        time=time,
+        focus=focus,
+        status=status,
+        request_id=request_id,
+    )
+
+
+@mcp.tool()
+def delete_private_session(
+    member_id: str,
+    session_id: str,
+) -> dict[str, Any]:
+    """按精确 member_id 与 session_id 删除课程并立即同步网站。
+
+    删除前应先通过 get_member_by_id 展示目标课程，避免误删。
+    """
+
+    return _call(
+        "delete_private_session",
+        member_id=member_id,
+        session_id=session_id,
+    )
+
+
+@mcp.tool()
+def update_private_session(
+    member_id: str,
+    session_id: str,
+    day: str = "",
+    date: str = "",
+    time: str = "",
+    focus: str = "",
+    status: str = "",
+) -> dict[str, Any]:
+    """调整一节指定私教课的日期、时间、训练重点或状态。
+
+    必须同时提供精确 member_id 与 session_id；未填写的字段保持不变。
+    修改前应先通过 get_member_by_id 核对课程，修改后再次查询确认。
+    """
+
+    return _call(
+        "update_private_session",
+        member_id=member_id,
+        session_id=session_id,
+        day=day,
+        date=date,
+        time=time,
+        focus=focus,
+        status=status,
+    )
+
+
+@mcp.tool()
+def update_training_plan(
+    member_id: str,
+    phase: str,
+    goal: str,
+    frequency: int,
+    focus: str,
+    note: str,
+    days: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """更新会员训练方案的完整内容并立即同步网站。"""
+
+    return _call(
+        "update_training_plan",
+        member_id=member_id,
+        phase=phase,
+        goal=goal,
+        frequency=frequency,
+        focus=focus,
+        note=note,
+        days=days,
+    )
+
+
+@mcp.tool()
+def update_nutrition_plan(
+    member_id: str,
+    calories: int,
+    protein: int,
+    carbs: int,
+    fat: int,
+    reminder: str,
+    meals: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """更新会员热量、宏量营养和餐单并立即同步网站。"""
+
+    return _call(
+        "update_nutrition_plan",
+        member_id=member_id,
+        calories=calories,
+        protein=protein,
+        carbs=carbs,
+        fat=fat,
+        reminder=reminder,
+        meals=meals,
+    )
+
+
+@mcp.tool()
+def add_body_feedback(
+    member_id: str,
+    summary: str,
+    next_focus: str,
+    risk: str,
+) -> dict[str, Any]:
+    """新增教练身体反馈并立即同步会员与教练页面。"""
+
+    return _call(
+        "add_body_feedback",
+        member_id=member_id,
+        summary=summary,
+        next_focus=next_focus,
+        risk=risk,
+    )
+
+
+@mcp.tool()
+def update_member_profile(
+    member_id: str,
+    plan: str,
+    expires_at: str,
+    level: str,
+) -> dict[str, Any]:
+    """更新会员计划、到期日期与会员等级并立即同步网站。"""
+
+    return _call(
+        "update_member_profile",
+        member_id=member_id,
+        plan=plan,
+        expires_at=expires_at,
+        level=level,
+    )
+
+
+@mcp.tool()
+def get_member_change_history(
+    member_id: str,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """查询指定会员最近的网站管理变更，用于核验工具是否真正执行成功。"""
+
+    return _call(
+        "get_member_change_history",
+        member_id=member_id,
+        limit=limit,
+    )
+
+
+@mcp.tool()
 def list_customer_ids() -> dict[str, Any]:
     """列出当前教练在企业微信客户联系中的 external_userid。
 

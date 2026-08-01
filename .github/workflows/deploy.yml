@@ -1,0 +1,100 @@
+name: Deploy verified release to Aliyun ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: "成功 CI 的 run ID"
+        required: true
+        type: string
+      commit_sha:
+        description: "与 CI 完全一致的 40 位 commit SHA"
+        required: true
+        type: string
+      confirm_production:
+        description: "第一次正式部署前必须选择 DEPLOY；选择 NO 只做拒绝检查"
+        required: true
+        default: "NO"
+        type: choice
+        options:
+          - "NO"
+          - "DEPLOY"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: aliyun-production
+  cancel-in-progress: false
+
+jobs:
+  reject-without-confirmation:
+    if: ${{ inputs.confirm_production != 'DEPLOY' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop before production
+        run: |
+          echo "未收到 DEPLOY 人工确认；没有连接生产服务器，也没有执行部署。"
+          exit 1
+
+  deploy:
+    if: ${{ inputs.confirm_production == 'DEPLOY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Check out deployment scripts only
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Verify successful CI and resolve immutable artifact
+        id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_RUN_ID: ${{ inputs.ci_run_id }}
+          EXPECTED_SHA: ${{ inputs.commit_sha }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: bash scripts/resolve-ci-artifact.sh
+
+      - name: Configure SSH without printing credentials
+        env:
+          ECS_SSH_KEY: ${{ secrets.ECS_SSH_KEY }}
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ECS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$ECS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Copy release controller (artifact is not copied)
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          scp scripts/release-deploy.sh "$ECS_USER@$ECS_HOST:/tmp/shao-release-deploy.sh"
+
+      - name: Let Aliyun download, verify and deploy GitHub artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+          ARTIFACT_URL: ${{ steps.artifact.outputs.download_url }}
+          ARTIFACT_SHA256: ${{ steps.artifact.outputs.artifact_sha256 }}
+          RELEASE_SHA: ${{ inputs.commit_sha }}
+        run: |
+          printf '%s\n' "$GH_TOKEN" | ssh "$ECS_USER@$ECS_HOST" \
+            "bash /tmp/shao-release-deploy.sh \
+              --base-dir /opt/shao-coach \
+              --artifact-url '$ARTIFACT_URL' \
+              --artifact-sha256 '$ARTIFACT_SHA256' \
+              --release-sha '$RELEASE_SHA' \
+              --token-stdin"
+
+      - name: Remove temporary controller
+        if: always()
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: ssh "$ECS_USER@$ECS_HOST" "rm -f /tmp/shao-release-deploy.sh"

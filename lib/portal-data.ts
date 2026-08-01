@@ -13,7 +13,11 @@ export type PortalView =
   | "coach-training"
   | "coach-nutrition"
   | "coach-body"
-  | "admin";
+  | "admin"
+  | "admin-ai"
+  | "admin-notifications"
+  | "admin-users"
+  | "admin-settings";
 
 export type Role = "member" | "coach" | "admin";
 
@@ -43,7 +47,46 @@ export type Booking = {
   time: string;
   title: string;
   coach: string;
+  focus?: string;
   status: "已完成" | "已预约" | "可预约" | "待确认" | "已取消";
+};
+
+export type TrainingPlan = {
+  phase: string;
+  goal: string;
+  frequency: number;
+  focus: string;
+  note: string;
+  updatedAt: string;
+  days: Array<{
+    id: string;
+    title: string;
+    duration: string;
+    exercises: string[];
+  }>;
+};
+
+export type NutritionPlan = {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  reminder: string;
+  updatedAt: string;
+  meals: Array<{
+    type: "早餐" | "午餐" | "加餐" | "晚餐";
+    time: string;
+    food: string;
+    calories: number;
+  }>;
+};
+
+export type BodyFeedback = {
+  id: string;
+  date: string;
+  summary: string;
+  nextFocus: string;
+  risk: "良好" | "注意" | "需关注";
 };
 
 export type Suggestion = {
@@ -74,6 +117,38 @@ export type PortalState = {
   streak: number;
   bookings: Booking[];
   suggestions: Suggestion[];
+  trainingPlan: TrainingPlan;
+  nutritionPlan: NutritionPlan;
+  bodyFeedbacks: BodyFeedback[];
+};
+
+export const defaultTrainingPlan: TrainingPlan = {
+  phase: "第 3 周",
+  goal: "体脂降至 15%",
+  frequency: 3,
+  focus: "下肢力量、核心稳定、动作质量",
+  note: "动作质量优先，训练中保持 RPE 7–8。根据当天恢复状态决定是否增加最后一组。",
+  updatedAt: "2026-07-29",
+  days: [
+    { id: "day-1", title: "下肢力量与髋稳定", duration: "70 分钟", exercises: ["高脚杯深蹲 · 4×10", "罗马尼亚硬拉 · 4×10", "保加利亚分腿蹲 · 3×10", "死虫式 · 3×12"] },
+    { id: "day-2", title: "上肢拉力与肩胛控制", duration: "65 分钟", exercises: ["高位下拉 · 4×10", "坐姿划船 · 4×12", "面拉 · 3×15", "农夫行走 · 4×30m"] },
+    { id: "day-3", title: "全身整合与心肺", duration: "60 分钟", exercises: ["壶铃硬拉 · 4×12", "台阶蹬踏 · 3×12", "雪橇推 · 6×20m", "低强度有氧 · 15min"] },
+  ],
+};
+
+export const defaultNutritionPlan: NutritionPlan = {
+  calories: 1800,
+  protein: 120,
+  carbs: 180,
+  fat: 60,
+  reminder: "训练日前后优先保证碳水；鄂州本地饮食可保留清淡汤类，减少重油、含糖饮料与夜宵。",
+  updatedAt: "2026-07-29",
+  meals: [
+    { type: "早餐", time: "07:30", food: "燕麦粥、鸡蛋、无糖牛奶、蓝莓", calories: 450 },
+    { type: "午餐", time: "12:30", food: "糙米饭、清蒸鱼、西兰花、菌菇", calories: 550 },
+    { type: "加餐", time: "16:00", food: "香蕉、无糖酸奶", calories: 200 },
+    { type: "晚餐", time: "19:00", food: "鸡胸肉、红薯、菠菜、豆腐", calories: 500 },
+  ],
 };
 
 export const demoState: PortalState = {
@@ -144,6 +219,17 @@ export const demoState: PortalState = {
       content: "蛋白质日均缺口约 22g，建议训练后增加一份低脂奶与鸡蛋，晚餐主食增加 30g。",
       status: "草稿",
       priority: "普通",
+    },
+  ],
+  trainingPlan: defaultTrainingPlan,
+  nutritionPlan: defaultNutritionPlan,
+  bodyFeedbacks: [
+    {
+      id: "feedback-1",
+      date: "2026-07-29",
+      summary: "本周体重和体脂下降节奏稳定，肌肉量保持良好。下一阶段继续以动作质量和稳定训练频率为主。",
+      nextFocus: "睡眠时长、膝部疼痛评分、训练后恢复",
+      risk: "良好",
     },
   ],
 };

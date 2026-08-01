@@ -1,11 +1,11 @@
 # 邵教练专属会员平台
 
-面向武汉私教业务的完整会员服务平台。生产链路由响应式网站、PostgreSQL、一个原生 Hermes 实例、DeepSeek V4 Flash、企业微信智能机器人和企业微信客户联系官方接口组成。
+面向鄂州私教业务的完整会员服务平台。生产链路由响应式网站、PostgreSQL、一个原生 Hermes 实例、DeepSeek V4 Flash、企业微信智能机器人和企业微信客户联系官方接口组成。
 
 ## 已实现
 
-- 会员端：首页使用中国内地手机号自助注册并自动登录；训练计划、训练计时、饮食饮水、连续打卡、身体指标、课程预约与会员权益。
-- 教练端：会员健康概览、预约日程、恢复风险提示、AI 建议草稿与发送任务状态。
+- 会员端：首页使用中国内地手机号自助注册并自动登录；训练计划、训练计时、饮食饮水、连续打卡、身体指标、教练排期查看与会员权益。
+- 教练端：会员健康概览、课程排期增删、训练/饮食方案、身体反馈、Hermes 管理与发送任务状态。
 - 管理端：用户角色、运营指标、服务与集成状态、安全和备案提示。
 - 智能体：网站与企业微信 AI Bot 共用现有 Hermes；Hermes 使用 `deepseek-v4-flash`，不安装第二个实例。
 - 企业微信入口：教练在“AI健身助理”单聊，或在授权内部群中 `@AI健身助理`。机器人通过 Hermes 原生 WeCom WebSocket 适配器连接 `wss://openws.work.weixin.qq.com`，无需普通群 Webhook。
@@ -82,7 +82,7 @@ Hermes `/var/lib/hermes/.hermes/.env`：
 sudo sh scripts/install-hermes-wecom-tools.sh /opt/shao-coach
 ```
 
-然后把 `deployment/hermes-wecom-mcp.example.yaml` 合并到 Hermes `config.yaml`，将 MCP 仅启用到 `wecom` 平台，并验证：
+然后把 `deployment/hermes-wecom-mcp.example.yaml` 合并到 Hermes `config.yaml`，将同一个 MCP 启用到 `wecom`、网站使用的 `api_server` 和 Hermes Desktop 使用的 `cli` 平台，并验证：
 
 ```bash
 sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes mcp test shao-coach

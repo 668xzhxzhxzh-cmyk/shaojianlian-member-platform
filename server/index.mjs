@@ -50,9 +50,31 @@ const seedState = {
     { id: "s2", member: "王芳", avatar: "王", title: "体态改善跟进", category: "恢复提醒", content: "近期久坐时间增加，建议本周加入两次胸椎活动与髋屈肌拉伸，每次 12 分钟。", status: "待确认", priority: "普通" },
     { id: "s3", member: "张伟", avatar: "张", title: "增肌饮食优化", category: "饮食建议", content: "蛋白质日均缺口约 22g，建议训练后增加一份低脂奶与鸡蛋，晚餐主食增加 30g。", status: "草稿", priority: "普通" },
   ],
+  trainingPlan: {
+    phase: "第 3 周", goal: "体脂降至 15%", frequency: 3, focus: "下肢力量、核心稳定、动作质量",
+    note: "动作质量优先，训练中保持 RPE 7–8。", updatedAt: "2026-07-29",
+    days: [
+      { id: "day-1", title: "下肢力量与髋稳定", duration: "70 分钟", exercises: ["高脚杯深蹲 · 4×10", "罗马尼亚硬拉 · 4×10", "死虫式 · 3×12"] },
+      { id: "day-2", title: "上肢拉力与肩胛控制", duration: "65 分钟", exercises: ["高位下拉 · 4×10", "坐姿划船 · 4×12", "面拉 · 3×15"] },
+    ],
+  },
+  nutritionPlan: {
+    calories: 1800, protein: 120, carbs: 180, fat: 60,
+    reminder: "训练日前后优先保证碳水；鄂州本地饮食可保留清淡汤类。",
+    updatedAt: "2026-07-29",
+    meals: [
+      { type: "早餐", time: "07:30", food: "燕麦粥、鸡蛋、无糖牛奶、蓝莓", calories: 450 },
+      { type: "午餐", time: "12:30", food: "糙米饭、清蒸鱼、西兰花、菌菇", calories: 550 },
+      { type: "加餐", time: "16:00", food: "香蕉、无糖酸奶", calories: 200 },
+      { type: "晚餐", time: "19:00", food: "鸡胸肉、红薯、菠菜、豆腐", calories: 500 },
+    ],
+  },
+  bodyFeedbacks: [
+    { id: "feedback-1", date: "2026-07-29", summary: "本周体重和体脂下降节奏稳定，肌肉量保持良好。", nextFocus: "睡眠时长、膝部疼痛评分、训练后恢复", risk: "良好" },
+  ],
 };
 
-const hermesPrompt = `你是 Hermes，是邵教练专属会员平台中的智能健康助理。请用简洁中文，基于训练、饮食、睡眠和身体数据给出可执行建议。区分数据事实、合理推断和待教练确认事项；不做医疗诊断；持续疼痛、夜间痛、眩晕或胸闷应建议暂停训练并咨询合格医务人员；不要声称已经发送微信消息。`;
+const hermesPrompt = `你是邵教练专属会员平台唯一的 Hermes 执行型管理智能体。你具备 shao-coach MCP 工具，可查询精确会员档案、列出教练名下 member_id、增改删私教课程、更新训练方案、更新饮食方案、新增身体反馈、更新会员计划并核验变更历史。不要回答“没有这个工具”；应先检查可用 MCP 工具并选择最窄的一个执行。所有查询与修改必须使用精确 member_id，禁止按姓名或昵称猜测。删除课程前必须先查询并向教练确认精确 session_id；新增课程缺少日期、时间或训练重点时应先追问，使用稳定 request_id 避免重试造成重复课程。执行修改后再次查询或读取变更历史，并明确列出真实改变的字段；页面会自动同步，无需提示用户点击同步按钮。管理端的 AI 建议管理只是审核队列，不是你的对话入口。客户消息仍必须先创建草稿并由教练确认；不要声称已经发送或会员已收到。不做医疗诊断；持续疼痛、夜间痛、眩晕或胸闷应建议暂停训练并咨询合格医务人员。`;
 
 await initializeDatabase();
 const wecomContact = createWecomContactService({ pool });
@@ -65,7 +87,7 @@ const server = createServer(async (request, response) => {
   try {
     if (url.pathname === "/health") return json(response, 200, {
       ok: true,
-      region: "wuhan",
+      region: "ezhou",
       time: new Date().toISOString(),
       integrations: {
         deepseek: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
@@ -78,7 +100,7 @@ const server = createServer(async (request, response) => {
       return wecomContact.handleInternalTool(request, response).catch((error) => {
         const status = Number(error?.statusCode || 500);
         return json(response, status, {
-          error: status < 500 ? error.message : "Hermes 会员工具暂时不可用",
+          error: status < 500 ? error.message : "AI 会员工具暂时不可用",
         });
       });
     }
@@ -101,6 +123,7 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === "/api/users" && request.method === "GET") return listUsers(response, session);
     if (url.pathname === "/api/users" && request.method === "POST") return createUser(request, response, session);
+    if (url.pathname === "/api/users" && request.method === "PATCH") return updateUser(request, response, session);
     if (url.pathname === "/api/actions" && request.method === "POST") return handleAction(request, response, session);
     if (url.pathname === "/api/agent/chat" && request.method === "POST") return handleHermes(request, response, session);
     return json(response, 404, { error: "接口不存在" });
@@ -180,6 +203,8 @@ async function login(request, response) {
   const body = await readJson(request);
   const phone = String(body.phone || "").replace(/\s/g, "");
   const password = String(body.password || "");
+  const expectedRole = String(body.expected_role || "");
+  if (!["member", "coach", "admin"].includes(expectedRole)) return json(response, 400, { error: "登录入口无效，请从对应角色入口重新登录" });
   if (!/^1\d{10}$/.test(phone) || password.length < 8 || password.length > 128) return json(response, 400, { error: "手机号或密码格式不正确" });
   const result = await pool.query("SELECT id,name,role,password_hash,status FROM users WHERE phone=$1 LIMIT 1", [phone]);
   const user = result.rows[0];
@@ -187,6 +212,11 @@ async function login(request, response) {
   if (!valid) {
     await new Promise((resolve) => setTimeout(resolve, 350));
     return json(response, 401, { error: "手机号或密码错误" });
+  }
+  if (user.role !== expectedRole) {
+    await audit(user.id, "login_role_mismatch", { expectedRole, actualRole: user.role });
+    const roleNames = { member: "会员端", coach: "教练端", admin: "管理端" };
+    return json(response, 403, { error: `该账号属于${roleNames[user.role]}，请从正确入口登录` });
   }
   return issueSession(response, user);
 }
@@ -302,7 +332,9 @@ async function writePortalState(userId, state) {
 
 async function listUsers(response, session) {
   if (!["coach", "admin"].includes(session.role)) return json(response, 403, { error: "没有用户管理权限" });
-  const result = await pool.query("SELECT id,name,phone,role,status,created_at FROM users ORDER BY created_at ASC LIMIT 500");
+  const result = session.role === "admin"
+    ? await pool.query("SELECT id,name,phone,role,status,created_at FROM users ORDER BY created_at ASC LIMIT 500")
+    : await pool.query("SELECT id,name,phone,role,status,created_at FROM users WHERE role='member' ORDER BY created_at ASC LIMIT 500");
   return json(response, 200, {
     users: result.rows.map((user) => ({
       ...user,
@@ -341,8 +373,17 @@ async function createUser(request, response, session) {
 
 async function handleAction(request, response, session) {
   const { action, payload = {} } = await readJson(request);
-  const userId = session.role === "member" ? session.id : "member-li";
+  const managementAction = String(action || "").startsWith("coach_");
+  if (managementAction && session.role !== "coach") {
+    return json(response, 403, { error: "仅教练可修改会员服务内容" });
+  }
+  const requestedMemberId = String(payload.member_id || "").trim();
+  if (managementAction && !requestedMemberId) {
+    return json(response, 400, { error: "必须提供精确 member_id" });
+  }
+  const userId = session.role === "member" ? session.id : (requestedMemberId || "member-li");
   const state = await readPortalState({ ...session, id: userId, role: "member" });
+  if (!state) return json(response, 404, { error: "找不到该 member_id 对应的会员" });
   if (action === "water") state.waterMl = Math.min(3500, state.waterMl + Math.min(1000, Math.max(0, Number(payload.amount) || 0)));
   else if (action === "meal") {
     const meal = state.meals.find((item) => item.id === String(payload.id || ""));
@@ -357,9 +398,41 @@ async function handleAction(request, response, session) {
     state.bodyMetrics.push(metric);
     state.bodyMetrics = state.bodyMetrics.slice(-90);
   } else if (action === "booking") {
-    const booking = state.bookings.find((item) => item.id === String(payload.id || ""));
-    if (!booking) return json(response, 404, { error: "找不到预约" });
-    booking.status = booking.status === "可预约" ? "已预约" : "已取消";
+    return json(response, 403, { error: "会员端不提供自行排课，课程由教练统一安排" });
+  } else if (action === "coach_booking_add") {
+    const booking = payload.booking && typeof payload.booking === "object" ? payload.booking : {};
+    const normalized = {
+      id: String(booking.id || `booking-${Date.now()}`).slice(0, 100),
+      day: String(booking.day || "").slice(0, 10),
+      date: String(booking.date || "").slice(0, 20),
+      time: String(booking.time || "").slice(0, 30),
+      title: "一对一私教",
+      coach: "邵教练",
+      focus: String(booking.focus || "一对一私教").slice(0, 120),
+      status: ["已完成", "已预约", "待确认"].includes(String(booking.status)) ? String(booking.status) : "已预约",
+    };
+    if (!normalized.day || !normalized.date || !/^\d{2}:\d{2}[–-]\d{2}:\d{2}$/.test(normalized.time)) return json(response, 400, { error: "课程日期或时间无效" });
+    state.bookings = [...(Array.isArray(state.bookings) ? state.bookings : []), normalized];
+  } else if (action === "coach_booking_delete") {
+    const id = String(payload.id || "");
+    if (!state.bookings?.some((item) => item.id === id)) return json(response, 404, { error: "找不到该课程" });
+    state.bookings = state.bookings.filter((item) => item.id !== id);
+  } else if (action === "coach_training_plan") {
+    if (!payload.plan || typeof payload.plan !== "object" || !Array.isArray(payload.plan.days)) return json(response, 400, { error: "训练方案格式无效" });
+    state.trainingPlan = payload.plan;
+  } else if (action === "coach_nutrition_plan") {
+    if (!payload.plan || typeof payload.plan !== "object" || !Array.isArray(payload.plan.meals)) return json(response, 400, { error: "饮食方案格式无效" });
+    state.nutritionPlan = payload.plan;
+  } else if (action === "coach_body_feedback") {
+    if (!payload.feedback || typeof payload.feedback !== "object") return json(response, 400, { error: "身体反馈格式无效" });
+    state.bodyFeedbacks = [...(Array.isArray(state.bodyFeedbacks) ? state.bodyFeedbacks : []), payload.feedback].slice(-100);
+  } else if (action === "coach_member_profile") {
+    const next = payload.profile && typeof payload.profile === "object" ? payload.profile : {};
+    const allowed = {};
+    for (const key of ["plan", "expiresAt", "level"]) {
+      if (typeof next[key] === "string" && next[key].trim()) allowed[key] = next[key].trim().slice(0, 120);
+    }
+    state.profile = { ...state.profile, ...allowed };
   } else if (action === "suggestion") {
     if (!["coach", "admin"].includes(session.role)) return json(response, 403, { error: "仅教练可确认建议" });
     const suggestion = state.suggestions.find((item) => item.id === String(payload.id || ""));
@@ -372,9 +445,9 @@ async function handleAction(request, response, session) {
 }
 
 async function handleHermes(request, response, session) {
-  if (!["coach", "admin"].includes(session.role)) {
+  if (session.role !== "coach") {
     await audit(session.id, "hermes_chat_denied", { role: session.role });
-    return json(response, 403, { error: "Hermes 仅供教练与管理员使用" });
+    return json(response, 403, { error: "Hermes AI 助理仅供教练账号使用" });
   }
   const body = await readJson(request);
   const memberId = String(body.member_id || "").trim();
@@ -383,17 +456,17 @@ async function handleHermes(request, response, session) {
   if (!memberState) return json(response, 404, { error: "找不到该 member_id 对应的会员" });
   const messages = Array.isArray(body.messages) ? body.messages.slice(-20).filter((item) => ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.length <= 4000) : [];
   if (!messages.length) return json(response, 400, { error: "请输入问题" });
-  if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) return json(response, 503, { error: "原生 Hermes API 尚未配置" });
+  if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) return json(response, 503, { error: "AI 服务尚未配置" });
 
   let hermesApi;
   try {
     hermesApi = new URL(process.env.HERMES_API_URL);
   } catch {
-    return json(response, 500, { error: "Hermes API 地址无效" });
+    return json(response, 500, { error: "AI 服务地址无效" });
   }
   const allowedHosts = new Set(["127.0.0.1", "localhost", "host.docker.internal"]);
   if (!["http:", "https:"].includes(hermesApi.protocol) || !allowedHosts.has(hermesApi.hostname)) {
-    return json(response, 500, { error: "Hermes API 必须使用服务器私有回环地址" });
+    return json(response, 500, { error: "AI 服务必须使用服务器私有回环地址" });
   }
 
   const upstream = await fetch(new URL("/v1/chat/completions", hermesApi), {
@@ -406,13 +479,13 @@ async function handleHermes(request, response, session) {
     body: JSON.stringify({
       model: "hermes-agent",
       stream: true,
-      messages: [{ role: "system", content: hermesPrompt }, { role: "system", content: `以下是 member_id=${memberId} 的只读会员数据：${JSON.stringify({ member: memberState.profile, bodyMetrics: memberState.bodyMetrics, meals: memberState.meals }).slice(0, 12000)}` }, ...messages],
+      messages: [{ role: "system", content: hermesPrompt }, { role: "system", content: `当前操作对象是精确 member_id=${memberId}。以下是网站最新会员数据；如教练要求修改，必须调用对应 MCP 网站管理工具，工具执行后网站会自动同步：${JSON.stringify({ member: memberState.profile, bodyMetrics: memberState.bodyMetrics, meals: memberState.meals, bookings: memberState.bookings, trainingPlan: memberState.trainingPlan, nutritionPlan: memberState.nutritionPlan, bodyFeedbacks: memberState.bodyFeedbacks }).slice(0, 18000)}` }, ...messages],
     }),
     signal: AbortSignal.timeout(120000),
   });
   if (!upstream.ok || !upstream.body) {
     console.error(JSON.stringify({ level: "error", integration: "hermes", status: upstream.status }));
-    return json(response, 502, { error: "Hermes 智能体暂时不可用" });
+    return json(response, 502, { error: "AI 智能体暂时不可用" });
   }
   response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store, no-transform", "x-accel-buffering": "no" });
   const reader = upstream.body.getReader();
@@ -436,6 +509,29 @@ async function handleHermes(request, response, session) {
   }
   response.end();
   await audit(session.id, "hermes_chat", { memberId, messageCount: messages.length });
+}
+
+async function updateUser(request, response, session) {
+  if (session.role !== "admin") return json(response, 403, { error: "仅管理员可修改账户权限" });
+  const body = await readJson(request);
+  const id = String(body.id || "").trim();
+  const role = String(body.role || "");
+  const status = String(body.status || "");
+  if (!id || !["member", "coach", "admin"].includes(role) || !["active", "disabled"].includes(status)) {
+    return json(response, 400, { error: "账户参数无效" });
+  }
+  const result = await pool.query(
+    "UPDATE users SET role=$2,status=$3 WHERE id=$1 RETURNING id,name,phone,role,status",
+    [id, role, status],
+  );
+  if (!result.rows[0]) return json(response, 404, { error: "找不到该账户" });
+  await audit(session.id, "user_update", { id, role, status });
+  return json(response, 200, {
+    user: {
+      ...result.rows[0],
+      phone: String(result.rows[0].phone).replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2"),
+    },
+  });
 }
 
 async function audit(actorId, action, detail) {

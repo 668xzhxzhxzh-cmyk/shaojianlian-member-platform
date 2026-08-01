@@ -7,7 +7,14 @@ import {
   useMemo,
   useState,
 } from "react";
-import { demoState, type PortalState } from "@/lib/portal-data";
+import {
+  demoState,
+  type BodyFeedback,
+  type Booking,
+  type NutritionPlan,
+  type PortalState,
+  type TrainingPlan,
+} from "@/lib/portal-data";
 
 type Toast = { id: number; message: string; tone: "success" | "info" | "warning" };
 
@@ -21,21 +28,32 @@ type PortalContextValue = {
   toggleMeal: (id: string) => void;
   checkIn: () => void;
   saveBodyMetric: (metric: { weight: number; bodyFat: number; muscle: number; waist: number }) => void;
-  updateBooking: (id: string) => void;
-  updateSuggestion: (id: string, status: "已发送" | "待确认" | "草稿") => void;
+  addCoachBooking: (booking: Omit<Booking, "id">) => void;
+  deleteCoachBooking: (id: string) => void;
+  saveTrainingPlan: (plan: TrainingPlan) => void;
+  saveNutritionPlan: (plan: NutritionPlan) => void;
+  saveBodyFeedback: (feedback: Omit<BodyFeedback, "id" | "date">) => void;
+  updateMemberProfile: (profile: Partial<PortalState["profile"]>) => void;
+  updateSuggestion: (id: string, status: "已发送" | "待确认" | "草稿", options?: { silent?: boolean }) => void;
 };
 
 const PortalContext = createContext<PortalContextValue | null>(null);
 
 async function persist(action: string, payload: Record<string, unknown>) {
   try {
-    await fetch("/api/actions", {
+    const response = await fetch("/api/actions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, payload }),
     });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      throw new Error(result.error || "数据保存失败");
+    }
+    return await response.json().catch(() => ({}));
   } catch {
     // UI remains usable in offline/demo mode. The next successful action syncs normally.
+    return null;
   }
 }
 
@@ -62,10 +80,10 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
   const notify = useCallback(
     (message: string, tone: Toast["tone"] = "success") => {
       const id = Date.now();
-      setToasts((items) => [...items, { id, message, tone }]);
+      setToasts([{ id, message, tone }]);
       window.setTimeout(() => {
         setToasts((items) => items.filter((item) => item.id !== id));
-      }, 3200);
+      }, 2400);
     },
     [],
   );
@@ -136,27 +154,74 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
     [notify],
   );
 
-  const updateBooking = useCallback(
+  const addCoachBooking = useCallback(
+    (booking: Omit<Booking, "id">) => {
+      const item: Booking = { ...booking, id: `booking-${Date.now()}` };
+      setState((current) => ({
+        ...current,
+        bookings: [...current.bookings, item],
+      }));
+      void persist("coach_booking_add", { member_id: state.profile.id, booking: item });
+      notify(`${booking.date} ${booking.time} 的私教课已加入排期`);
+    },
+    [notify, state.profile.id],
+  );
+
+  const deleteCoachBooking = useCallback(
     (id: string) => {
       setState((current) => ({
         ...current,
-        bookings: current.bookings.map((booking) =>
-          booking.id === id
-            ? {
-                ...booking,
-                status: booking.status === "可预约" ? "已预约" : "已取消",
-              }
-            : booking,
-        ),
+        bookings: current.bookings.filter((booking) => booking.id !== id),
       }));
-      void persist("booking", { id });
-      notify("预约状态已更新");
+      void persist("coach_booking_delete", { member_id: state.profile.id, id });
+      notify("该节私教课已从排期删除");
     },
-    [notify],
+    [notify, state.profile.id],
+  );
+
+  const saveTrainingPlan = useCallback(
+    (plan: TrainingPlan) => {
+      setState((current) => ({ ...current, trainingPlan: plan }));
+      void persist("coach_training_plan", { member_id: state.profile.id, plan });
+      notify(`${state.profile.name} 的训练方案已保存并发布`);
+    },
+    [notify, state.profile.id, state.profile.name],
+  );
+
+  const saveNutritionPlan = useCallback(
+    (plan: NutritionPlan) => {
+      setState((current) => ({ ...current, nutritionPlan: plan }));
+      void persist("coach_nutrition_plan", { member_id: state.profile.id, plan });
+      notify(`${state.profile.name} 的饮食方案已保存并发布`);
+    },
+    [notify, state.profile.id, state.profile.name],
+  );
+
+  const saveBodyFeedback = useCallback(
+    (feedback: Omit<BodyFeedback, "id" | "date">) => {
+      const item: BodyFeedback = {
+        ...feedback,
+        id: `feedback-${Date.now()}`,
+        date: new Date().toISOString().slice(0, 10),
+      };
+      setState((current) => ({ ...current, bodyFeedbacks: [...(current.bodyFeedbacks ?? []), item] }));
+      void persist("coach_body_feedback", { member_id: state.profile.id, feedback: item });
+      notify(`${state.profile.name} 的身体反馈已保存并发布`);
+    },
+    [notify, state.profile.id, state.profile.name],
+  );
+
+  const updateMemberProfile = useCallback(
+    (profile: Partial<PortalState["profile"]>) => {
+      setState((current) => ({ ...current, profile: { ...current.profile, ...profile } }));
+      void persist("coach_member_profile", { member_id: state.profile.id, profile });
+      notify("会员档案已更新");
+    },
+    [notify, state.profile.id],
   );
 
   const updateSuggestion = useCallback(
-    (id: string, status: "已发送" | "待确认" | "草稿") => {
+    (id: string, status: "已发送" | "待确认" | "草稿", options?: { silent?: boolean }) => {
       setState((current) => ({
         ...current,
         suggestions: current.suggestions.map((suggestion) =>
@@ -164,7 +229,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         ),
       }));
       void persist("suggestion", { id, status });
-      notify(status === "已发送" ? "建议已交给 Hermes 推送" : "建议状态已保存");
+      if (!options?.silent) notify(status === "已发送" ? "发送任务已创建，请在企业微信客户端确认发送。" : "建议状态已更新");
     },
     [notify],
   );
@@ -180,7 +245,12 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
       toggleMeal,
       checkIn,
       saveBodyMetric,
-      updateBooking,
+      addCoachBooking,
+      deleteCoachBooking,
+      saveTrainingPlan,
+      saveNutritionPlan,
+      saveBodyFeedback,
+      updateMemberProfile,
       updateSuggestion,
     }),
     [
@@ -193,7 +263,12 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
       toggleMeal,
       checkIn,
       saveBodyMetric,
-      updateBooking,
+      addCoachBooking,
+      deleteCoachBooking,
+      saveTrainingPlan,
+      saveNutritionPlan,
+      saveBodyFeedback,
+      updateMemberProfile,
       updateSuggestion,
     ],
   );

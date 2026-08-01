@@ -14,7 +14,7 @@ test("builds the member portal without starter artifacts", async () => {
   assert.doesNotMatch(`${page}${portal}${packageJson}`, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
-test("includes coach approval, native Hermes and WeCom AI Bot tooling", async () => {
+test("includes coach approval, native agent and WeCom AI Bot tooling", async () => {
   const [coach, admin, assistant, envExample, tools, contact] = await Promise.all([
     readFile(new URL("../components/coach-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
@@ -27,29 +27,61 @@ test("includes coach approval, native Hermes and WeCom AI Bot tooling", async ()
   assert.match(coach, /训练方案设计/);
   assert.match(assistant, /Hermes Agent/);
   assert.match(envExample, /DEEPSEEK_MODEL=deepseek-v4-flash/);
-  assert.match(admin, /企业微信 AI Bot/);
+  assert.match(admin, /企业微信 AI 助理/);
   assert.match(tools, /get_member_by_id/);
   assert.match(contact, /externalcontact\/add_msg_template/);
   assert.match(contact, /发送任务已创建，请在企业微信客户端确认发送。/);
   assert.doesNotMatch(`${assistant}${contact}`, /notifications\/weixin|WECOM_WEBHOOK_URL/);
 });
 
-test("keeps member booking private-only and coach AI access server-side", async () => {
-  const [portal, memberViews, coach, server] = await Promise.all([
+test("removes member booking and gives the coach interactive schedule control", async () => {
+  const [portal, memberViews, bookingPage, coach, server] = await Promise.all([
     readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/member-views.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/booking/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/coach-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../server/index.mjs", import.meta.url), "utf8"),
   ]);
   const memberNavBlock = portal.slice(portal.indexOf("const memberNav"), portal.indexOf("const coachNav"));
-  assert.doesNotMatch(memberNavBlock, /assistant|Hermes|智能助理/);
-  assert.match(memberViews, /length: 13/);
-  assert.match(memberViews, /节私教/);
-  assert.match(memberViews, /仅一对一私教/);
+  assert.doesNotMatch(memberNavBlock, /assistant|Hermes|智能助理|课程预约|booking/);
+  assert.doesNotMatch(memberViews, /export function BookingView/);
+  assert.match(memberViews, /由教练统一排期/);
+  assert.match(bookingPage, /redirect\("\/"\)/);
+  assert.match(coach, /新增课程/);
+  assert.match(coach, /deleteCoachBooking/);
   assert.match(coach, /coach-training/);
   assert.match(coach, /coach-nutrition/);
   assert.match(coach, /coach-body/);
-  assert.match(server, /Hermes 仅供教练与管理员使用/);
+  assert.match(server, /coach_booking_add/);
+  assert.match(server, /coach_booking_delete/);
+  assert.match(server, /Hermes AI 助理仅供教练账号使用/);
+});
+
+test("adds interactive charts, distinct admin sections, and Hermes website management tools", async () => {
+  const [ui, portal, admin, assistant, tools, contact, layout] = await Promise.all([
+    readFile(new URL("../components/ui.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/assistant-view.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../server/hermes_tools_mcp.py", import.meta.url), "utf8"),
+    readFile(new URL("../server/wecom-contact.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(ui, /trend-tooltip/);
+  assert.match(ui, /onMouseEnter/);
+  assert.match(portal, /admin-notifications/);
+  assert.match(portal, /admin-users/);
+  assert.match(portal, /admin-settings/);
+  assert.match(portal, /admin-ai/);
+  assert.match(admin, /管理账户/);
+  assert.match(admin, /saveManagedUser/);
+  assert.doesNotMatch(assistant, /assistant-flow/);
+  for (const operation of ["list_members", "add_private_session", "update_private_session", "delete_private_session", "update_training_plan", "update_nutrition_plan", "add_body_feedback", "update_member_profile", "get_member_change_history"]) {
+    assert.match(tools, new RegExp(operation));
+    assert.match(contact, new RegExp(operation));
+  }
+  assert.doesNotMatch(`${portal}${admin}${assistant}${layout}`, /\u6b66\u6c49|Wuhan|wuhan/);
+  assert.doesNotMatch(`${portal}${admin}`, />\s*同步数据\s*</);
 });
 
 test("keeps mainland deployment and secret configuration documented", async () => {
@@ -90,4 +122,78 @@ test("supports safe member self-registration and automatic sign-in", async () =>
   assert.match(portal, /还没有账号？立即注册/);
   assert.match(portal, /注册并进入平台/);
   assert.match(portal, /用户协议/);
+});
+
+test("ships the final responsive member polish and simplified admin navigation", async () => {
+  const [memberViews, portal, admin, css] = await Promise.all([
+    readFile(new URL("../components/member-views.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  for (const className of ["weekly-goals-card", "coach-advice-card", "training-rhythm-card", "hydration-card", "measurement-guide-card"]) {
+    assert.match(memberViews, new RegExp(className));
+    assert.match(css, new RegExp(`\\.${className}`));
+  }
+  const adminNavBlock = portal.slice(portal.indexOf("const adminNav"), portal.indexOf("export function FitnessPortal"));
+  assert.doesNotMatch(adminNavBlock, /教练运营/);
+  assert.doesNotMatch(adminNavBlock, /\/coach\/schedule/);
+  assert.match(admin, /admin-settings-layout/);
+  assert.match(admin, /integration-status-grid/);
+  assert.match(admin, /fetch\("\/health"/);
+  assert.match(admin, /hermesMemberTools/);
+  assert.match(admin, /wecomContact/);
+  assert.match(admin, /IntegrationBadge/);
+  assert.match(css, /\.integration-status-grid em\.warning/);
+  assert.match(css, /@media \(max-width: 720px\)/);
+  assert.match(css, /\.admin-settings-layout \{ grid-template-columns: 1fr; \}/);
+});
+
+test("separates administrator and coach accounts, portals, and permissions", async () => {
+  const [portal, server, adminView, css, adminLoginRoute, coachLoginRoute] = await Promise.all([
+    readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../server/index.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/login/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/coach/login/page.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(portal, /expected_role: requestedRole/);
+  assert.doesNotMatch(portal, /requestedRole === "coach" && result\.user\.role === "admin"/);
+  assert.match(portal, /管理端独立登录/);
+  assert.match(portal, /教练端独立登录/);
+  assert.match(portal, /系统管理员/);
+  assert.match(server, /user\.role !== expectedRole/);
+  assert.match(server, /managementAction && session\.role !== "coach"/);
+  assert.match(server, /if \(session\.role !== "coach"\)/);
+  assert.match(server, /WHERE role='member'/);
+  assert.match(adminView, /name: "系统管理员", role: "管理员"/);
+  assert.match(adminView, /name: "邵教练", role: "教练"/);
+  assert.match(css, /\.admin-login-page \.login-brand-panel/);
+  assert.match(css, /\.coach-login-page \.login-brand-panel/);
+  assert.match(adminLoginRoute, /initialView="admin"/);
+  assert.match(coachLoginRoute, /initialView="coach"/);
+});
+
+test("shows five scrollable notifications, explains AI roles, and uses single-column management login", async () => {
+  const [portal, assistant, css, mcpConfig] = await Promise.all([
+    readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/assistant-view.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../deployment/hermes-wecom-mcp.example.yaml", import.meta.url), "utf8"),
+  ]);
+  assert.match(portal, /notification-popover-list/);
+  assert.match(portal, /共 5 条/);
+  assert.match(portal, /Hermes 可执行会员任务/);
+  assert.match(portal, /role === "admin" && itemView === "admin-ai"/);
+  assert.match(css, /max-height: 338px; overflow-y: auto/);
+  assert.match(css, /touch-action: pan-y/);
+  assert.match(portal, /login-page-single/);
+  assert.match(portal, /"教练端"/);
+  assert.match(portal, /"管理端"/);
+  assert.match(portal, />会员端</);
+  assert.match(assistant, /教练端：对话并执行会员任务/);
+  assert.match(assistant, /管理端：审核建议、权限与发送合规/);
+  assert.match(mcpConfig, /api_server:\s*\n\s*- shao-coach/);
+  assert.match(mcpConfig, /cli:\s*\n\s*- shao-coach/);
 });

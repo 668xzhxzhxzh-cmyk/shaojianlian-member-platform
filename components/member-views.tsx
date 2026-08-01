@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   Activity,
   Apple,
@@ -8,7 +8,6 @@ import {
   BadgeCheck,
   CalendarCheck,
   Check,
-  ChevronLeft,
   ChevronRight,
   CircleDot,
   Clock3,
@@ -19,6 +18,7 @@ import {
   HeartPulse,
   Medal,
   MoonStar,
+  MapPin,
   Plus,
   Scale,
   Target,
@@ -27,20 +27,23 @@ import {
   Trophy,
   UserRoundCheck,
   Utensils,
+  X,
 } from "lucide-react";
-import { trainingExercises } from "@/lib/portal-data";
+import { trainingExercises, type Booking } from "@/lib/portal-data";
 import { usePortal } from "./portal-context";
 import { Avatar, Card, ProgressBar, Ring, SectionTitle, StatCard, TrendChart } from "./ui";
 
 const weeklyDays = ["一", "二", "三", "四", "五", "六", "日"];
 
 export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
-  const { state, checkIn } = usePortal();
+  const { state, checkIn, notify } = usePortal();
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const latest = state.bodyMetrics.at(-1);
   const onboarding = !latest;
   const mealCalories = state.meals
     .filter((meal) => meal.completed)
     .reduce((sum, meal) => sum + meal.calories, 0);
+  const scheduledBookings = state.bookings.filter((booking) => !["可预约", "已取消"].includes(booking.status));
 
   return (
     <div className="view-stack">
@@ -64,32 +67,37 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
 
       <div className="dashboard-main-grid">
         <Card className="schedule-card span-2">
-          <SectionTitle title="本周安排" action={<button className="text-button" onClick={() => goTo("booking")}>查看课表 <ArrowRight size={15} /></button>} />
-          <div className="mini-week">
-            {state.bookings.map((booking, index) => (
+          <SectionTitle title="本周私教安排" action={<span className="pill">由教练统一排期</span>} />
+          <div className="member-week-schedule">
+            {scheduledBookings.map((booking) => (
               <button
+                type="button"
                 key={booking.id}
-                className={`mini-day ${booking.status === "已预约" ? "is-current" : ""}`}
-                onClick={() => goTo("booking")}
+                className={`member-session-card ${booking.status === "已预约" ? "is-current" : ""}`}
+                onClick={() => setSelectedBooking(booking)}
               >
-                <span>{booking.day}</span>
-                <b>{booking.date}</b>
-                <strong>一对一私教</strong>
-                <small>{booking.time}</small>
+                <span className="member-session-date"><small>{booking.day}</small><b>{booking.date}</b></span>
+                <span className="member-session-copy"><strong>{booking.title || "一对一私教"}</strong><small><Clock3 size={14} /> {booking.time} · {booking.focus || "专属训练课程"}</small></span>
                 <em className={`status status-${booking.status}`}>{booking.status}</em>
-                {index === 2 ? <span className="today-dot" /> : null}
+                <ChevronRight size={18} />
               </button>
             ))}
+            {!scheduledBookings.length ? <div className="empty-hint">邵教练暂未发布新的课程排期。</div> : null}
           </div>
+          {scheduledBookings.length ? <p className="schedule-helper">点击课程可查看时间、训练内容与调整方式。</p> : null}
         </Card>
 
-        <Card>
-          <SectionTitle title="本周训练目标" />
-          <div className="goal-list">
-            <GoalRow icon={Dumbbell} label={onboarding ? "等待训练计划" : "完成 4 次力量训练"} value={onboarding ? "待制定" : "4 / 5 次"} percent={onboarding ? 0 : 80} />
-            <GoalRow icon={Flame} label={onboarding ? "开始记录训练" : "累计消耗 6500 kcal"} value={onboarding ? "0 kcal" : "6,240 / 6,500"} percent={onboarding ? 0 : 96} />
-            <GoalRow icon={CalendarCheck} label="本周训练打卡" value={onboarding ? "0 天" : "4 / 5 天"} percent={onboarding ? 0 : 80} />
-            <GoalRow icon={Apple} label="记录每日饮食" value={onboarding ? "尚未记录" : "今日已达标"} percent={onboarding ? 0 : 100} />
+        <Card className="weekly-goals-card">
+          <SectionTitle title="本周训练目标" action={<span className="weekly-goal-score">{onboarding ? "待开始" : "整体完成 89%"}</span>} />
+          <div className="goal-focus">
+            <span><Target size={20} /></span>
+            <div><small>本周核心目标</small><b>{onboarding ? "完成首次身体记录" : "稳定完成 5 次训练，保持恢复节奏"}</b></div>
+          </div>
+          <div className="goal-tiles">
+            <GoalRow icon={Dumbbell} label="力量训练" value={onboarding ? "待制定" : "4 / 5 次"} percent={onboarding ? 0 : 80} />
+            <GoalRow icon={Flame} label="训练消耗" value={onboarding ? "0 kcal" : "6,240 kcal"} percent={onboarding ? 0 : 96} />
+            <GoalRow icon={CalendarCheck} label="训练打卡" value={onboarding ? "0 天" : "4 / 5 天"} percent={onboarding ? 0 : 80} />
+            <GoalRow icon={Apple} label="饮食执行" value={onboarding ? "尚未记录" : "今日达标"} percent={onboarding ? 0 : 100} />
           </div>
         </Card>
 
@@ -104,18 +112,11 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
           <div className="trend-note">{onboarding ? <><Scale size={17} /> 完成首次身体数据记录后，这里会生成你的专属趋势。</> : <><TrendingDown size={17} /> 近三周体重下降 <strong>2.9 kg</strong>，节奏稳定。</>}</div>
         </Card>
 
-        <Card>
-          <SectionTitle title="邵教练建议" />
-          <div className="coach-note">
-            <Avatar name="邵教练" size="lg" />
-            <div>
-              <p>{onboarding ? "欢迎加入。请先填写身体数据与训练目标，我确认后会为你制定个性化训练和饮食建议。" : "本周力量训练完成度很高，恢复状态良好。训练后优先补充优质蛋白，今晚保证 7–8 小时睡眠。"}</p>
-              <span>— 邵教练{onboarding ? "" : " · 今天 09:30"}</span>
-            </div>
-          </div>
-          <button className="button button-secondary full" onClick={() => goTo("body")}>
-            <Activity size={17} /> 查看本周身体反馈
-          </button>
+        <Card className="coach-advice-card">
+          <div className="coach-advice-head"><Avatar name="邵教练" size="lg" /><div><span className="eyebrow">邵教练 · 今日建议</span><h3>{onboarding ? "先完成你的身体建档" : "恢复良好，保持现在的节奏"}</h3></div><BadgeCheck size={20} /></div>
+          <blockquote>{onboarding ? "欢迎加入。先记录身体数据和训练目标，我会据此为你制定第一阶段计划。" : "本周力量训练完成度很高。训练后优先补充优质蛋白，今晚保证 7–8 小时睡眠。"}</blockquote>
+          <div className="advice-tags"><span><MoonStar size={15} /> 睡眠 7–8 小时</span><span><Apple size={15} /> 补充优质蛋白</span></div>
+          <button className="coach-advice-link" onClick={() => goTo("body")}><span><Activity size={17} /> 查看完整身体反馈</span><ArrowRight size={17} /></button>
         </Card>
       </div>
 
@@ -152,6 +153,28 @@ export function DashboardView({ goTo }: { goTo: (view: string) => void }) {
           </div>
         </Card>
       </div>
+
+      {selectedBooking ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSelectedBooking(null)}>
+          <section className="modal session-detail-modal" role="dialog" aria-modal="true" aria-label="私教课程详情" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="icon-button modal-close" onClick={() => setSelectedBooking(null)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">已发布课程</span>
+            <h2>{selectedBooking.title || "一对一私教"}</h2>
+            <p>课程由邵教练统一安排，会员端仅展示已确认信息。</p>
+            <div className="session-detail-date"><CalendarCheck size={22} /><span><b>{selectedBooking.day} · {selectedBooking.date}</b><small>{selectedBooking.time}</small></span><em className={`status status-${selectedBooking.status}`}>{selectedBooking.status}</em></div>
+            <div className="session-detail-grid">
+              <span><Dumbbell size={18} /><small>训练重点</small><b>{selectedBooking.focus || "根据当日状态进行专属训练"}</b></span>
+              <span><UserRoundCheck size={18} /><small>授课教练</small><b>{selectedBooking.coach || "邵教练"}</b></span>
+              <span><MapPin size={18} /><small>上课地点</small><b>邵教练私教工作室</b></span>
+              <span><Clock3 size={18} /><small>到场提示</small><b>请提前 10 分钟到场</b></span>
+            </div>
+            <div className="session-detail-actions">
+              <button className="button button-secondary" type="button" onClick={() => setSelectedBooking(null)}>关闭</button>
+              <button className="button button-primary" type="button" onClick={() => { setSelectedBooking(null); notify("如需调整课程，请通过微信联系邵教练确认", "info"); }}>联系教练调整</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -160,7 +183,8 @@ function GoalRow({ icon: Icon, label, value, percent }: { icon: typeof Dumbbell;
   return (
     <div className="goal-row">
       <span className="goal-icon"><Icon size={18} /></span>
-      <div><div className="row-between"><b>{label}</b><small>{value}</small></div><ProgressBar value={percent} /></div>
+      <div><small>{label}</small><b>{value}</b><ProgressBar value={percent} /></div>
+      <em>{percent}%</em>
     </div>
   );
 }
@@ -223,19 +247,21 @@ export function TrainingView() {
           </div>
         </Card>
         <div className="side-stack">
-          <Card>
-            <SectionTitle title="训练节奏" />
-            <div className="timeline-list">
-              <Timeline time="08:00" title="热身激活" detail="10 分钟" done />
-              <Timeline time="08:10" title="力量训练" detail="40 分钟" active />
-              <Timeline time="08:50" title="核心训练" detail="15 分钟" />
-              <Timeline time="09:05" title="拉伸放松" detail="10 分钟" />
+          <Card className="training-rhythm-card">
+            <SectionTitle title="训练节奏" action={<span className="pill">75 分钟</span>} />
+            <div className="rhythm-progress"><span style={{ width: "32%" }} /></div>
+            <div className="rhythm-stage-head"><small>当前阶段</small><b>力量训练 · 已进行 18 分钟</b></div>
+            <div className="rhythm-stages">
+              <Timeline time="10′" title="热身激活" detail="已完成" done />
+              <Timeline time="40′" title="力量训练" detail="进行中" active />
+              <Timeline time="15′" title="核心训练" detail="待开始" />
+              <Timeline time="10′" title="拉伸放松" detail="待开始" />
             </div>
           </Card>
           <Card className="coach-tip-card">
-            <Avatar name="邵教练" size="lg" />
-            <div><span className="eyebrow">教练提示</span><h3>动作质量优先</h3></div>
-            <p>深蹲下放时保持膝盖与脚尖方向一致；如果肩部不适，卧推重量立即下调。</p>
+            <div className="coach-tip-head"><span><UserRoundCheck size={19} /></span><div><small>邵教练提示</small><h3>动作质量优先于重量</h3></div></div>
+            <p>深蹲下放时保持膝盖与脚尖方向一致；任何肩部不适都应立即降低负荷。</p>
+            <div className="coach-tip-rules"><span><Check size={14} /> 膝盖朝向脚尖</span><span><HeartPulse size={14} /> 不适立即降重</span></div>
           </Card>
         </div>
       </div>
@@ -244,7 +270,7 @@ export function TrainingView() {
 }
 
 function Timeline({ time, title, detail, done, active }: { time: string; title: string; detail: string; done?: boolean; active?: boolean }) {
-  return <div className={`timeline-item ${done ? "done" : ""} ${active ? "active" : ""}`}><span>{done ? <Check size={14} /> : <CircleDot size={14} />}</span><time>{time}</time><div><b>{title}</b><small>{detail}</small></div></div>;
+  return <div className={`rhythm-stage ${done ? "done" : ""} ${active ? "active" : ""}`}><span>{done ? <Check size={14} /> : active ? <TimerReset size={14} /> : <CircleDot size={14} />}</span><div><b>{title}</b><small>{time} · {detail}</small></div></div>;
 }
 
 export function NutritionView() {
@@ -282,14 +308,13 @@ export function NutritionView() {
           </div>
           <div className="positive-banner"><BadgeCheck size={18} /> 营养目标接近日目标，保持当前节奏</div>
         </Card>
-        <Card>
-          <SectionTitle title="饮水记录" />
-          <strong className="water-value">{(state.waterMl / 1000).toFixed(1)} <small>/ 2.5 L</small></strong>
-          <div className="cups" aria-label="今日饮水进度">
-            {Array.from({ length: 7 }).map((_, index) => <span className={state.waterMl >= (index + 1) * 350 ? "filled" : ""} key={index}><Droplets size={18} /></span>)}
+        <Card className="hydration-card">
+          <SectionTitle title="今日饮水" action={<span className="hydration-status">{state.waterMl >= 2500 ? "已达标" : "还差 " + Math.max(0, 2500 - state.waterMl) + " ml"}</span>} />
+          <div className="hydration-main">
+            <div className="hydration-ring" style={{ "--water-progress": `${Math.min(100, (state.waterMl / 2500) * 100)}%` } as CSSProperties}><Droplets size={25} /><strong>{(state.waterMl / 1000).toFixed(1)}</strong><small>/ 2.5 L</small></div>
+            <div><b>保持少量多次</b><p>训练前后分次补水，避免一次大量饮用。</p><div className="hydration-dots">{Array.from({ length: 5 }).map((_, index) => <span className={state.waterMl >= (index + 1) * 500 ? "filled" : ""} key={index} />)}</div></div>
           </div>
-          <ProgressBar value={(state.waterMl / 2500) * 100} />
-          <button className="button button-primary full" onClick={() => addWater(250)}><Plus size={17} /> 记录一杯 250 ml</button>
+          <div className="hydration-actions"><button onClick={() => addWater(250)}><Plus size={16} /> 250 ml</button><button onClick={() => addWater(500)}><Plus size={16} /> 500 ml</button></div>
         </Card>
       </div>
       <div className="content-grid-2">
@@ -426,7 +451,10 @@ export function BodyView() {
       <div className="content-grid-3">
         <Card><SectionTitle title="目标进度" /><div className="goal-big"><strong>{latest ? "72%" : "0%"}</strong><span>{latest ? "距离 65 kg 还差 2.9 kg" : "记录首次数据后设置目标"}</span><ProgressBar value={latest ? 72 : 0} /></div></Card>
         <Card><SectionTitle title="本月变化" /><div className="delta-grid"><div><b>{latest ? "-1.9" : "—"}</b><span>kg 体重</span></div><div><b>{latest ? "-0.7" : "—"}</b><span>% 体脂</span></div><div><b>{latest ? "+0.8" : "—"}</b><span>kg 肌肉</span></div></div></Card>
-        <Card><SectionTitle title="测量提示" /><p className="body-copy">起床排空后、早餐前测量；穿着保持一致。短期波动多来自水分，关注 2–4 周趋势。</p></Card>
+        <Card className="measurement-guide-card">
+          <SectionTitle title="科学测量指南" action={<span className="measurement-frequency">每周 1 次</span>} />
+          <div className="measurement-steps"><span><Clock3 size={18} /><b>固定时间</b><small>起床排空后、早餐前</small></span><span><Scale size={18} /><b>保持一致</b><small>相同设备与穿着状态</small></span><span><TrendingDown size={18} /><b>关注趋势</b><small>以 2–4 周变化为准</small></span></div>
+        </Card>
       </div>
       <section className="card inline-editor body-record-editor" ref={recordRef} id="body-record">
         <div>
@@ -448,136 +476,14 @@ export function BodyView() {
   );
 }
 
-export function BookingView() {
-  const { state, updateBooking, notify } = usePortal();
-  const [mode, setMode] = useState<"week" | "month">("week");
-  const [activeDay, setActiveDay] = useState(2);
-  const hours = Array.from({ length: 13 }, (_, index) => `${String(index + 8).padStart(2, "0")}:00`);
-  const monthCounts: Record<string, number> = {
-    "7/1": 2, "7/3": 3, "7/5": 1, "7/7": 2, "7/9": 4, "7/10": 2,
-    "7/12": 2, "7/14": 3, "7/16": 2, "7/18": 4, "7/20": 1, "7/22": 3,
-    "7/24": 2, "7/25": 1, "7/27": 2, "7/28": 3, "7/29": 2, "7/30": 2,
-    "7/31": 3, "8/1": 2, "8/2": 1,
-  };
-  const monthCells = Array.from({ length: 35 }, (_, index) => {
-    if (index < 2) return null;
-    const sequence = index - 1;
-    return sequence <= 31 ? { key: `7/${sequence}`, day: sequence, nextMonth: false } : { key: `8/${sequence - 31}`, day: sequence - 31, nextMonth: true };
-  });
-
-  function reserveNext() {
-    const available = state.bookings.find((booking) => booking.status === "可预约");
-    if (!available) return notify("本周没有可预约的私教时段", "info");
-    setActiveDay(state.bookings.findIndex((booking) => booking.id === available.id));
-    setMode("week");
-    updateBooking(available.id);
-  }
-
-  function handleSession(booking: (typeof state.bookings)[number]) {
-    if (booking.status === "可预约" || booking.status === "已预约") {
-      updateBooking(booking.id);
-      return;
-    }
-    notify(`${booking.date} ${booking.time} · ${booking.status}`, "info");
-  }
-
-  return (
-    <div className="view-stack">
-      <div className="page-intro-row">
-        <PageIntro eyebrow="一对一私教预约" title="选择适合你的训练时间" text="完整查看邵教练可约时段；所有课程均为一对一私教，不设团体课。" />
-        <button className="button button-primary" onClick={reserveNext}><Plus size={17} /> 预约最近时段</button>
-      </div>
-      <div className="booking-layout">
-        <Card className="span-3 booking-calendar-card">
-          <div className="booking-toolbar booking-toolbar-new">
-            <div className="segmented"><button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}>周视图</button><button className={mode === "month" ? "active" : ""} onClick={() => setMode("month")}>月视图</button></div>
-            <div className="period-switcher">
-              <button className="icon-button" aria-label="上一周" onClick={() => notify("已是当前可预约周期", "info")}><ChevronLeft size={17} /></button>
-              <strong>{mode === "week" ? "2026 年 7 月 27 日 — 8 月 2 日" : "2026 年 7 月"}</strong>
-              <button className="icon-button" aria-label="下一周" onClick={() => notify("下一周期将在教练开放后显示", "info")}><ChevronRight size={17} /></button>
-            </div>
-            <span className="private-only"><UserRoundCheck size={15} /> 仅一对一私教</span>
-          </div>
-          {mode === "week" ? (
-            <>
-              <div className="booking-grid-scroll">
-                <div className="booking-time-grid" aria-label="一对一私教周课表">
-                  <div className="booking-grid-corner">时间</div>
-                  {state.bookings.map((booking, index) => <button key={`head-${booking.id}`} className={activeDay === index ? "active" : ""} onClick={() => setActiveDay(index)}><span>{booking.day}</span><b>{booking.date}</b>{index === 2 ? <em>今天</em> : null}</button>)}
-                  {hours.map((hour) => (
-                    <div className="booking-grid-row" key={hour}>
-                      <time>{hour}</time>
-                      {state.bookings.map((booking) => {
-                        const session = booking.time.startsWith(hour);
-                        return <div className={`booking-grid-cell ${session ? "has-session" : ""}`} key={`${booking.id}-${hour}`}>{session ? <button className={`private-session status-${booking.status}`} onClick={() => handleSession(booking)}><span>{booking.time}</span><b>一对一私教</b><small>{booking.coach}</small><em>{booking.status}</em></button> : null}</div>;
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="booking-mobile-agenda">
-                <div className="booking-day-strip">
-                  {state.bookings.map((booking, index) => <button key={`mobile-${booking.id}`} className={activeDay === index ? "active" : ""} onClick={() => setActiveDay(index)}><span>{booking.day.replace("周", "")}</span><b>{booking.date.split("/")[1]}</b>{index === 2 ? <i /> : null}</button>)}
-                </div>
-                <div className="mobile-agenda-list">
-                  {hours.map((hour) => {
-                    const booking = state.bookings[activeDay];
-                    const session = booking.time.startsWith(hour);
-                    return <div key={`agenda-${hour}`} className={session ? "has-session" : ""}><time>{hour}</time>{session ? <button className={`private-session status-${booking.status}`} onClick={() => handleSession(booking)}><span>{booking.time}</span><b>一对一私教 · {booking.coach}</b><em>{booking.status}{booking.status === "可预约" ? " · 点击预约" : booking.status === "已预约" ? " · 点击取消" : ""}</em></button> : <span>暂无开放时段</span>}</div>;
-                  })}
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="booking-month-head">{weeklyDays.map((day) => <span key={day}>周{day}</span>)}</div>
-              <div className="booking-month booking-month-new" aria-label="2026 年 7 月私教课月历">
-                {monthCells.map((cell, index) => {
-                  if (!cell) return <div className="month-empty" key={`empty-${index}`} />;
-                  const count = monthCounts[cell.key] ?? 0;
-                  const booking = state.bookings.find((item) => item.date === cell.key);
-                  return <button key={cell.key} className={`${count ? "has-class" : ""} ${cell.nextMonth ? "next-month" : ""}`} onClick={() => {
-                    if (booking) {
-                      setActiveDay(state.bookings.findIndex((item) => item.id === booking.id));
-                      setMode("week");
-                    } else {
-                      notify(count ? `${cell.key} 共 ${count} 节一对一私教` : `${cell.key} 暂无开放私教时段`, "info");
-                    }
-                  }}><span>{cell.day}</span>{count ? <b>{count} 节私教</b> : <small>暂无排期</small>}{booking ? <em className={`status status-${booking.status}`}>{booking.time.split("–")[0]} · {booking.status}</em> : null}</button>;
-                })}
-              </div>
-            </>
-          )}
-          <div className="calendar-legend"><span><i className="legend-done" /> 已完成</span><span><i className="legend-booked" /> 已预约</span><span><i className="legend-open" /> 可预约</span><span><i className="legend-wait" /> 待确认</span></div>
-        </Card>
-        <div className="side-stack">
-          <Card className="coach-availability">
-            <div className="coach-hero"><Avatar name="邵教练" size="lg" /><div><span className="eyebrow">本周安排</span><h3>邵教练</h3></div></div>
-            <div className="availability"><strong>3</strong><ProgressBar value={43} /><span>本周剩余可约时段</span></div>
-            <button className="button button-secondary full" onClick={() => setMode("month")}><CalendarCheck size={17} /> 查看月度排期</button>
-          </Card>
-          <Card>
-            <SectionTitle title="我的上课统计" />
-            <div className="number-grid"><div><span>本周已上课</span><b>2 节</b></div><div><span>本周已预约</span><b>2 节</b></div><div><span>本月累计</span><b>9 节</b></div><div><span>剩余课时</span><b>15 节</b></div></div>
-          </Card>
-          <Card>
-            <SectionTitle title="预约规则" />
-            <ul className="plain-list"><li>私教课至少提前 12 小时预约</li><li>待确认课程将在 2 小时内处理</li><li>取消预约请提前至少 12 小时</li><li>爽约将影响后续优先预约资格</li></ul>
-          </Card>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function BenefitsView() {
   const { notify } = usePortal();
   const benefits = [
     { icon: UserRoundCheck, title: "一对一专属指导", text: "邵教练根据你的训练反馈与身体变化实时调整方案。" },
-    { icon: CalendarCheck, title: "优先预约特权", text: "一对一私教时段优先锁定，重要周期提前开放。" },
+    { icon: CalendarCheck, title: "优先排期权益", text: "一对一私教时段由邵教练优先安排，重要周期提前锁定。" },
     { icon: Activity, title: "完整身体评估", text: "周期性体态、体成分与运动表现评估，趋势持续可追踪。" },
     { icon: HeartPulse, title: "教练周期复盘", text: "训练、饮食与恢复由邵教练统一复盘并给出下一阶段安排。" },
-    { icon: Apple, title: "个性化饮食方案", text: "按目标、口味与武汉本地饮食习惯制定可执行方案。" },
+    { icon: Apple, title: "个性化饮食方案", text: "按目标、口味与鄂州本地饮食习惯制定可执行方案。" },
     { icon: BadgeCheck, title: "隐私与数据保护", text: "数据最小化采集、分角色访问，并提供导出和注销流程。" },
   ];
   return (

@@ -1,2 +1,5 @@
-import { FitnessPortal } from "@/components/fitness-portal";
-export default function BookingPage() { return <FitnessPortal initialView="booking" />; }
+import { redirect } from "next/navigation";
+
+export default function BookingPage() {
+  redirect("/");
+}

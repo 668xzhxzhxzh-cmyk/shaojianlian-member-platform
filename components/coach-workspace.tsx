@@ -17,16 +17,26 @@ import {
   HeartPulse,
   MessageCircleMore,
   Plus,
-  RefreshCcw,
   Save,
   Search,
   Send,
   Sparkles,
   Target,
+  Trash2,
   UserRoundPlus,
   UsersRound,
+  X,
 } from "lucide-react";
-import { memberRows, type BodyMetric } from "@/lib/portal-data";
+import {
+  defaultNutritionPlan,
+  defaultTrainingPlan,
+  memberRows,
+  type BodyMetric,
+  type Booking,
+  type NutritionPlan,
+  type PortalState,
+  type TrainingPlan,
+} from "@/lib/portal-data";
 import { usePortal } from "./portal-context";
 import { Avatar, Card, ProgressBar, SectionTitle, StatCard, TrendChart } from "./ui";
 
@@ -42,11 +52,18 @@ type CoachWorkspaceProps = {
 };
 
 const coachSchedule = [
-  { time: "08:00", member: "李明远", focus: "下肢力量与髋稳定", status: "已完成" },
-  { time: "09:30", member: "王雨桐", focus: "体态评估与肩颈松解", status: "待开始" },
-  { time: "11:00", member: "张小北", focus: "上肢拉力与核心", status: "待开始" },
-  { time: "14:00", member: "陈思颖", focus: "核心重建", status: "待开始" },
-  { time: "16:00", member: "刘一航", focus: "膝关节活动度", status: "待确认" },
+  { id: "cs-1", date: "07/31", day: "今天", time: "08:00", member: "李明远", focus: "下肢力量与髋稳定", status: "已完成" },
+  { id: "cs-2", date: "07/31", day: "今天", time: "09:30", member: "王雨桐", focus: "体态评估与肩颈松解", status: "待开始" },
+  { id: "cs-3", date: "07/31", day: "今天", time: "11:00", member: "张小北", focus: "上肢拉力与核心", status: "待开始" },
+  { id: "cs-4", date: "07/31", day: "今天", time: "14:00", member: "陈思颖", focus: "核心重建", status: "待开始" },
+  { id: "cs-5", date: "07/31", day: "今天", time: "16:00", member: "刘一航", focus: "膝关节活动度", status: "待确认" },
+  { id: "cs-6", date: "08/01", day: "周六", time: "09:00", member: "李明远", focus: "上肢拉力与肩胛控制", status: "已确认" },
+  { id: "cs-7", date: "08/01", day: "周六", time: "14:30", member: "王雨桐", focus: "全身燃脂循环", status: "已确认" },
+  { id: "cs-8", date: "08/02", day: "周日", time: "10:00", member: "张小北", focus: "动作评估与计划复盘", status: "待确认" },
+  { id: "cs-9", date: "08/03", day: "周一", time: "18:30", member: "陈思颖", focus: "核心稳定进阶", status: "已确认" },
+  { id: "cs-10", date: "08/06", day: "周四", time: "19:00", member: "刘一航", focus: "下肢活动度与稳定", status: "已确认" },
+  { id: "cs-11", date: "08/12", day: "周三", time: "18:00", member: "李明远", focus: "阶段体测与负荷调整", status: "已确认" },
+  { id: "cs-12", date: "08/20", day: "周四", time: "19:30", member: "王雨桐", focus: "月度复盘与计划迭代", status: "待确认" },
 ];
 
 export function CoachWorkspace({
@@ -56,7 +73,15 @@ export function CoachWorkspace({
   goTo,
   openAssistant,
 }: CoachWorkspaceProps) {
-  const { state, notify } = usePortal();
+  const {
+    state,
+    addCoachBooking,
+    deleteCoachBooking,
+    saveTrainingPlan,
+    saveNutritionPlan,
+    saveBodyFeedback,
+    updateMemberProfile,
+  } = usePortal();
   const [members, setMembers] = useState<CoachMember[]>(memberRows);
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? members[0];
   const sectionLabels: Record<CoachSection, string> = {
@@ -102,16 +127,16 @@ export function CoachWorkspace({
               <h1>{sectionLabels[section]}</h1>
               <p>{section === "members" ? "先进入会员档案，再围绕同一位会员安排训练、饮食和身体反馈。" : `当前正在为 ${selectedMember.name} 处理专属服务。`}</p>
             </div>
-            <button className="button button-secondary" onClick={() => notify("会员数据已同步")}><RefreshCcw size={17} /> 同步数据</button>
+            <span className="auto-sync-note"><Check size={16} /> 页面与 AI 修改会自动同步</span>
           </section>
-          {section !== "members" && section !== "schedule" ? (
+          {section !== "members" ? (
             <MemberContextBar member={selectedMember} members={members} onSelectMember={onSelectMember} goTo={goTo} />
           ) : null}
-          {section === "members" ? <MemberManagement members={members} selectedMemberId={selectedMember.id} onSelectMember={onSelectMember} goTo={goTo} /> : null}
-          {section === "schedule" ? <CoachSchedule members={members} notify={notify} /> : null}
-          {section === "training" ? <TrainingDesigner member={selectedMember} notify={notify} /> : null}
-          {section === "nutrition" ? <NutritionDesigner member={selectedMember} notify={notify} /> : null}
-          {section === "body" ? <BodyFeedback member={selectedMember} data={state.bodyMetrics} notify={notify} /> : null}
+          {section === "members" ? <MemberManagement members={members} selectedMemberId={selectedMember.id} onSelectMember={onSelectMember} goTo={goTo} profile={state.profile} onUpdateProfile={updateMemberProfile} /> : null}
+          {section === "schedule" ? <CoachSchedule member={selectedMember} bookings={state.bookings} addBooking={addCoachBooking} deleteBooking={deleteCoachBooking} /> : null}
+          {section === "training" ? <TrainingDesigner key={`${selectedMember.id}-${state.profile.id}-${state.trainingPlan?.updatedAt ?? "default"}`} member={selectedMember} plan={state.trainingPlan ?? defaultTrainingPlan} onSave={saveTrainingPlan} /> : null}
+          {section === "nutrition" ? <NutritionDesigner key={`${selectedMember.id}-${state.profile.id}-${state.nutritionPlan?.updatedAt ?? "default"}`} member={selectedMember} plan={state.nutritionPlan ?? defaultNutritionPlan} onSave={saveNutritionPlan} /> : null}
+          {section === "body" ? <BodyFeedback key={`${selectedMember.id}-${state.profile.id}-${state.bodyFeedbacks?.at(-1)?.id ?? "none"}`} member={selectedMember} data={state.bodyMetrics} feedbacks={state.bodyFeedbacks ?? []} onSave={saveBodyFeedback} /> : null}
         </>
       )}
     </div>
@@ -129,8 +154,13 @@ function CoachOverview({
   onSelectMember: (memberId: string) => void;
   members: CoachMember[];
 }) {
-  const { state, notify } = usePortal();
+  const { state } = usePortal();
   const pending = state.suggestions.filter((item) => item.status === "待确认").length;
+  const [scheduleRange, setScheduleRange] = useState<"day" | "week" | "month">("day");
+  const [selectedSession, setSelectedSession] = useState<(typeof coachSchedule)[number] | null>(null);
+  const [recapOpen, setRecapOpen] = useState(false);
+  const visibleSchedule = coachSchedule.slice(0, scheduleRange === "day" ? 5 : scheduleRange === "week" ? 9 : 12);
+  const rangeTitle = scheduleRange === "day" ? "今日私教安排" : scheduleRange === "week" ? "本周私教安排" : "本月私教安排";
   return (
     <>
       <section className="coach-hero-row">
@@ -140,7 +170,7 @@ function CoachOverview({
           <p>先处理今天的私教课，再跟进需要调整方案的会员。</p>
         </div>
         <div className="inline-actions">
-          <button className="button button-secondary" onClick={openAssistant}><Sparkles size={17} /> Hermes 工作台</button>
+          <button className="button button-secondary" onClick={openAssistant}><Sparkles size={17} /> AI 工作台</button>
           <button className="button button-primary" onClick={() => goTo("coach-members", "/coach/members", "会员管理")}><UserRoundPlus size={17} /> 管理会员</button>
         </div>
       </section>
@@ -148,29 +178,27 @@ function CoachOverview({
         <StatCard icon={CalendarDays} label="今日一对一私教" value="5" suffix="节" note="首节 08:00" onClick={() => goTo("coach-schedule", "/coach/schedule", "课程排期")} />
         <StatCard icon={UsersRound} label="活跃会员" value="28" suffix="人" note="3 人需要跟进" onClick={() => goTo("coach-members", "/coach/members", "会员管理")} />
         <StatCard icon={AlertTriangle} label="身体风险提醒" value="3" suffix="项" note="1 项需今日处理" accent="amber" onClick={() => goTo("coach-body", "/coach/body", "身体反馈")} />
-        <StatCard icon={Sparkles} label="Hermes 待确认" value={pending} suffix="条" note="确认后创建企微任务" accent="slate" onClick={openAssistant} />
+        <StatCard icon={Sparkles} label="AI 待确认" value={pending} suffix="条" note="确认后创建企微任务" accent="slate" onClick={openAssistant} />
       </div>
       <div className="coach-overview-grid">
         <Card className="coach-today-card span-2">
-          <SectionTitle title="今日私教安排" action={<button className="text-button" onClick={() => goTo("coach-schedule", "/coach/schedule", "课程排期")}>完整排期 <ArrowRight size={15} /></button>} />
-          <div className="coach-timeline">
-            {coachSchedule.map((item, index) => {
+          <SectionTitle title={rangeTitle} action={<div className="schedule-range-switch" aria-label="排期范围">{(["day", "week", "month"] as const).map((range) => <button key={range} className={scheduleRange === range ? "active" : ""} onClick={() => setScheduleRange(range)}>{range === "day" ? "日" : range === "week" ? "周" : "月"}</button>)}</div>} />
+          <div className={`coach-timeline coach-timeline-${scheduleRange}`}>
+            {visibleSchedule.map((item, index) => {
               const member = members[index % members.length];
               return (
-              <button key={item.time} onClick={() => {
-                if (member) onSelectMember(member.id);
-                goTo("coach-training", "/coach/training", "训练方案");
-              }}>
-                <time>{item.time}</time>
+              <button key={item.id} onClick={() => setSelectedSession({ ...item, member: member?.name ?? item.member })}>
+                <time><small>{item.day}</small>{item.time}</time>
                 <i className={index === 0 ? "done" : index === 1 ? "active" : ""} />
                 <Avatar name={member?.name ?? item.member} size="sm" />
-                <span><b>{member?.name ?? item.member}</b><small>{item.focus}</small></span>
+                <span><b>{member?.name ?? item.member}</b><small>{item.date} · {item.focus}</small></span>
                 <em>{item.status}</em>
                 <ChevronRight size={16} />
               </button>
               );
             })}
           </div>
+          <button className="schedule-full-link" onClick={() => goTo("coach-schedule", "/coach/schedule", "课程排期")}>进入完整课程排期 <ArrowRight size={15} /></button>
         </Card>
         <Card>
           <SectionTitle title="今日优先事项" />
@@ -203,9 +231,35 @@ function CoachOverview({
             <QualityRow label="饮食记录完整度" value={76} />
             <QualityRow label="身体数据更新率" value={68} />
           </div>
-          <button className="button button-secondary full" onClick={() => notify("本周复盘报告已生成", "info")}><FileText size={17} /> 生成本周复盘</button>
+          <button className="button button-secondary full" onClick={() => setRecapOpen(true)}><FileText size={17} /> 生成本周复盘</button>
         </Card>
       </div>
+      {selectedSession ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSelectedSession(null)}>
+          <section className="modal session-detail-modal coach-session-modal" role="dialog" aria-modal="true" aria-label="教练课程详情" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="icon-button modal-close" onClick={() => setSelectedSession(null)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">{selectedSession.day} · {selectedSession.date}</span>
+            <h2>{selectedSession.member}的私教课</h2>
+            <p>查看课程重点后，可进入会员训练方案继续准备本次课程。</p>
+            <div className="session-detail-date"><Clock3 size={22} /><span><b>{selectedSession.time}</b><small>预计 60–75 分钟</small></span><em>{selectedSession.status}</em></div>
+            <div className="session-detail-grid"><span><Dumbbell size={18} /><small>课程重点</small><b>{selectedSession.focus}</b></span><span><ClipboardCheck size={18} /><small>课前准备</small><b>复核恢复评分与风险提醒</b></span></div>
+            <div className="session-detail-actions"><button className="button button-secondary" onClick={() => { setSelectedSession(null); goTo("coach-schedule", "/coach/schedule", "课程排期"); }}>管理排期</button><button className="button button-primary" onClick={() => { const member = members.find((item) => item.name === selectedSession.member); if (member) onSelectMember(member.id); setSelectedSession(null); goTo("coach-training", "/coach/training", "训练方案"); }}>打开训练方案</button></div>
+          </section>
+        </div>
+      ) : null}
+      {recapOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setRecapOpen(false)}>
+          <section className="modal weekly-recap-modal" role="dialog" aria-modal="true" aria-label="本周执行复盘" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="icon-button modal-close" onClick={() => setRecapOpen(false)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">7 月 27 日—8 月 2 日</span>
+            <h2>本周教练执行复盘</h2>
+            <p>数据已汇总完成。复盘不会自动发送给会员，可继续交给 AI 生成跟进建议。</p>
+            <div className="recap-metrics"><span><small>已完成课程</small><b>18</b><em>节</em></span><span><small>到课率</small><b>94</b><em>%</em></span><span><small>计划完成率</small><b>82</b><em>%</em></span></div>
+            <div className="recap-sections"><article><b>本周亮点</b><p>会员整体到课稳定；李明远的下肢力量计划完成度最高，动作质量持续改善。</p></article><article className="warning"><b>需要跟进</b><p>3 位会员恢复评分偏低，刘一航膝部不适需要在下次训练前完成风险复核。</p></article><article><b>下周建议</b><p>保持主计划不变，为恢复偏低会员减少 10%–15% 训练负荷，并安排一次动作评估。</p></article></div>
+            <div className="session-detail-actions"><button className="button button-secondary" onClick={() => setRecapOpen(false)}>关闭复盘</button><button className="button button-primary" onClick={() => { setRecapOpen(false); openAssistant(); }}><Sparkles size={17} /> 交给 AI 生成建议</button></div>
+          </section>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -227,7 +281,7 @@ function MemberContextBar({
         <Avatar name={member.name} size="lg" />
         <div><span className="eyebrow">当前会员</span><h2>{member.name}</h2><small>{member.phone} · {member.plan}</small></div>
       </div>
-      <label>切换会员<select value={member.id} onChange={(event) => onSelectMember(event.target.value)}>{members.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.goal}</option>)}</select></label>
+      <label>切换会员<select data-testid="coach-member-switcher" value={member.id} onChange={(event) => onSelectMember(event.target.value)}>{members.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.goal}</option>)}</select></label>
       <div className="member-context-metrics"><span>当前目标<b>{member.goal}</b></span><span>恢复评分<b>{member.recovery}</b></span><span>下次私教<b>{member.next}</b></span></div>
       <button className="text-button" onClick={() => goTo("coach-members", "/coach/members", "会员管理")}>完整档案 <ArrowRight size={15} /></button>
     </section>
@@ -239,16 +293,31 @@ function MemberManagement({
   selectedMemberId,
   onSelectMember,
   goTo,
+  profile,
+  onUpdateProfile,
 }: {
   members: CoachMember[];
   selectedMemberId: string;
   onSelectMember: (memberId: string) => void;
   goTo: CoachWorkspaceProps["goTo"];
+  profile: PortalState["profile"];
+  onUpdateProfile: (profile: Partial<PortalState["profile"]>) => void;
 }) {
   const [search, setSearch] = useState("");
   const [risk, setRisk] = useState("全部状态");
+  const [editing, setEditing] = useState(false);
   const visibleMembers = members.filter((member) => (!search || `${member.name}${member.phone}${member.goal}`.includes(search)) && (risk === "全部状态" || member.risk === risk));
   const selected = members.find((member) => member.id === selectedMemberId) ?? members[0];
+  function saveProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    onUpdateProfile({
+      plan: String(data.get("plan") || profile.plan),
+      expiresAt: String(data.get("expiresAt") || profile.expiresAt),
+      level: String(data.get("level") || profile.level),
+    });
+    setEditing(false);
+  }
   return (
     <div className="coach-members-layout">
       <Card className="member-directory">
@@ -271,6 +340,7 @@ function MemberManagement({
         <Card className="member-record-hero">
           <div><Avatar name={selected.name} size="lg" /><span><span className="eyebrow">MEMBER ID · {selected.id}</span><h2>{selected.name}</h2><small>{selected.phone} · {selected.plan}</small></span></div>
           <div className="record-hero-stats"><span>当前目标<b>{selected.goal}</b></span><span>恢复评分<b>{selected.recovery} / 100</b></span><span>出勤率<b>{selected.attendance}%</b></span><span>下次私教<b>{selected.next}</b></span></div>
+          <button className="button button-secondary button-small" onClick={() => setEditing(true)}>编辑会员档案</button>
         </Card>
         <div className="member-service-grid">
           <MemberServiceCard icon={Dumbbell} title="训练方案" text="第 3 周 · 下肢力量与核心稳定" note="昨天已更新" onClick={() => goTo("coach-training", "/coach/training", "训练方案")} />
@@ -286,96 +356,175 @@ function MemberManagement({
           </div>
         </Card>
       </div>
+      {editing ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setEditing(false)}>
+          <form className="modal modal-compact" onSubmit={saveProfile} onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="icon-button modal-close" onClick={() => setEditing(false)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">MEMBER ID · {selected.id}</span>
+            <h2>编辑 {selected.name} 的会员档案</h2>
+            <label className="stacked-label">会员计划<input name="plan" defaultValue={profile.id === selected.id ? profile.plan : selected.plan} required /></label>
+            <label className="stacked-label">到期日期<input name="expiresAt" type="date" defaultValue={profile.expiresAt.includes("/") ? profile.expiresAt.replaceAll("/", "-") : ""} /></label>
+            <label className="stacked-label">会员等级<select name="level" defaultValue={profile.level}><option>会员</option><option>VIP</option><option>尊享会员</option></select></label>
+            <button className="button button-primary full" type="submit"><Save size={17} /> 保存会员档案</button>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function CoachSchedule({ members, notify }: { members: CoachMember[]; notify: (message: string, tone?: "success" | "info" | "warning") => void }) {
-  const days = ["周一 7/27", "周二 7/28", "周三 7/29", "周四 7/30", "周五 7/31", "周六 8/1", "周日 8/2"];
+function CoachSchedule({
+  member,
+  bookings,
+  addBooking,
+  deleteBooking,
+}: {
+  member: CoachMember;
+  bookings: Booking[];
+  addBooking: (booking: Omit<Booking, "id">) => void;
+  deleteBooking: (id: string) => void;
+}) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [selectedSession, setSelectedSession] = useState<Booking | null>(null);
+  const activeBookings = bookings.filter((booking) => booking.status !== "已取消");
+  const completed = activeBookings.filter((booking) => booking.status === "已完成").length;
+  const pending = activeBookings.filter((booking) => booking.status === "待确认").length;
+
+  function addSession(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const rawDate = String(data.get("date") || "");
+    const start = String(data.get("time") || "09:00");
+    const startMinutes = Number(start.slice(0, 2)) * 60 + Number(start.slice(3, 5));
+    const endMinutes = startMinutes + 60;
+    const end = `${String(Math.floor(endMinutes / 60)).padStart(2, "0")}:${String(endMinutes % 60).padStart(2, "0")}`;
+    const date = new Date(`${rawDate}T12:00:00`);
+    const day = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][date.getDay()];
+    addBooking({
+      day,
+      date: `${date.getMonth() + 1}/${date.getDate()}`,
+      time: `${start}–${end}`,
+      title: "一对一私教",
+      coach: "邵教练",
+      focus: String(data.get("focus") || "一对一私教"),
+      status: String(data.get("status") || "已预约") as Booking["status"],
+    });
+    setAddOpen(false);
+  }
+
   return (
     <>
       <div className="stats-grid four">
-        <StatCard icon={CalendarCheck} label="本周私教" value="32" suffix="节" note="已完成 18 节" />
-        <StatCard icon={Clock3} label="可约时段" value="9" suffix="个" note="周五晚间最紧张" accent="amber" />
-        <StatCard icon={Check} label="到课率" value="94" suffix="%" note="较上周 +3%" />
-        <StatCard icon={AlertTriangle} label="待确认" value="3" suffix="节" note="今天内处理" accent="slate" />
+        <StatCard icon={CalendarCheck} label="当前会员排期" value={activeBookings.length} suffix="节" note={`已完成 ${completed} 节`} />
+        <StatCard icon={Clock3} label="待上课程" value={Math.max(0, activeBookings.length - completed)} suffix="节" note={member.name} accent="amber" />
+        <StatCard icon={Check} label="到课率" value={activeBookings.length ? Math.round((completed / activeBookings.length) * 100) : 0} suffix="%" note="按当前排期计算" />
+        <StatCard icon={AlertTriangle} label="待确认" value={pending} suffix="节" note="需要教练处理" accent="slate" />
       </div>
       <Card className="coach-schedule-card">
-        <SectionTitle title="本周一对一私教排期" action={<button className="button button-primary button-small" onClick={() => notify("新增私教排期面板已准备", "info")}><Plus size={16} /> 新增排期</button>} />
-        <div className="coach-week-board">
-          {days.map((day, dayIndex) => (
-            <section key={day}>
-              <header><b>{day.split(" ")[0]}</b><span>{day.split(" ")[1]}</span></header>
-              {[9, 11, 14, 16, 18].map((hour, slotIndex) => {
-                const booked = (dayIndex + slotIndex) % 3 !== 1;
-                const member = members[(dayIndex + slotIndex) % members.length];
-                return <button key={hour} className={booked ? "booked" : "open"} onClick={() => notify(booked ? `${day} ${hour}:00 · ${member.name} 一对一私教` : `${day} ${hour}:00 可新增一对一私教`, "info")}><time>{hour}:00</time>{booked ? <><b>{member.name}</b><small>{member.goal}</small></> : <><Plus size={15} /><b>可安排</b><small>一对一私教</small></>}</button>;
-              })}
-            </section>
-          ))}
+        <SectionTitle title={`${member.name} · 一对一私教排期`} action={<button className="button button-primary button-small" onClick={() => setAddOpen(true)}><Plus size={16} /> 新增课程</button>} />
+        <div className="coach-session-list">
+          {activeBookings.length ? activeBookings.map((booking) => (
+            <article key={booking.id}>
+              <button className="coach-session-main" onClick={() => setSelectedSession(booking)}>
+                <time><b>{booking.date}</b><span>{booking.day}</span></time>
+                <span><b>{booking.time}</b><small>{booking.focus || booking.title}</small></span>
+                <em className={`status status-${booking.status}`}>{booking.status}</em>
+                <ChevronRight size={17} />
+              </button>
+              <button className="icon-button danger-icon" onClick={() => setSelectedSession(booking)} aria-label={`删除 ${booking.date} ${booking.time} 课程`}><Trash2 size={17} /></button>
+            </article>
+          )) : (
+            <button className="empty-schedule-action" onClick={() => setAddOpen(true)}><Plus size={22} /><b>还没有课程排期</b><span>点击为 {member.name} 安排第一节一对一私教</span></button>
+          )}
         </div>
       </Card>
+      {addOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setAddOpen(false)}>
+          <form className="modal modal-compact" onSubmit={addSession} onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="icon-button modal-close" onClick={() => setAddOpen(false)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">MEMBER ID · {member.id}</span>
+            <h2>为 {member.name} 新增一对一私教</h2>
+            <label className="stacked-label">上课日期<input name="date" type="date" defaultValue="2026-07-31" required /></label>
+            <label className="stacked-label">开始时间<input name="time" type="time" defaultValue="09:00" min="06:00" max="22:00" required /></label>
+            <label className="stacked-label">训练重点<input name="focus" defaultValue={member.goal} required maxLength={80} /></label>
+            <label className="stacked-label">课程状态<select name="status" defaultValue="已预约"><option>已预约</option><option>待确认</option><option>已完成</option></select></label>
+            <button className="button button-primary full" type="submit"><Plus size={17} /> 保存课程排期</button>
+          </form>
+        </div>
+      ) : null}
+      {selectedSession ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSelectedSession(null)}>
+          <div className="modal modal-compact" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="icon-button modal-close" onClick={() => setSelectedSession(null)} aria-label="关闭"><X size={20} /></button>
+            <span className="eyebrow">{selectedSession.day} · {selectedSession.date}</span>
+            <h2>{selectedSession.time} 一对一私教</h2>
+            <p>{member.name} · {selectedSession.focus || member.goal}</p>
+            <div className="modal-actions">
+              <button className="button button-secondary" onClick={() => setSelectedSession(null)}>保留课程</button>
+              <button className="button button-danger" onClick={() => { deleteBooking(selectedSession.id); setSelectedSession(null); }}><Trash2 size={17} /> 删除课程</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
 
-function TrainingDesigner({ member, notify }: { member: (typeof memberRows)[number]; notify: (message: string, tone?: "success" | "info" | "warning") => void }) {
-  const [phase, setPhase] = useState("第 3 周");
+function TrainingDesigner({ member, plan, onSave }: { member: CoachMember; plan: TrainingPlan; onSave: (plan: TrainingPlan) => void }) {
+  const [draft, setDraft] = useState<TrainingPlan>(() => JSON.parse(JSON.stringify(plan)) as TrainingPlan);
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    notify(`${member.name} 的训练方案已保存`);
+    onSave({ ...draft, updatedAt: new Date().toISOString().slice(0, 10) });
+  }
+  function updateDay(index: number, next: TrainingPlan["days"][number]) {
+    setDraft((current) => ({ ...current, days: current.days.map((day, dayIndex) => dayIndex === index ? next : day) }));
   }
   return (
     <div className="coach-design-grid">
       <Card className="plan-editor span-2">
-        <SectionTitle title={`${member.name} · 训练方案设计`} action={<select value={phase} onChange={(event) => setPhase(event.target.value)}><option>第 1 周</option><option>第 2 周</option><option>第 3 周</option><option>第 4 周</option></select>} />
+        <SectionTitle title={`${member.name} · 训练方案设计`} action={<select value={draft.phase} onChange={(event) => setDraft((current) => ({ ...current, phase: event.target.value }))}><option>第 1 周</option><option>第 2 周</option><option>第 3 周</option><option>第 4 周</option></select>} />
         <form onSubmit={save}>
           <div className="plan-summary-grid">
-            <label>阶段目标<input defaultValue={member.goal} /></label>
-            <label>本周频次<select defaultValue="3"><option value="2">每周 2 次</option><option value="3">每周 3 次</option><option value="4">每周 4 次</option></select></label>
-            <label>训练重点<input defaultValue="下肢力量、核心稳定、动作质量" /></label>
+            <label>阶段目标<input value={draft.goal} onChange={(event) => setDraft((current) => ({ ...current, goal: event.target.value }))} /></label>
+            <label>本周频次<select value={draft.frequency} onChange={(event) => setDraft((current) => ({ ...current, frequency: Number(event.target.value) }))}><option value="2">每周 2 次</option><option value="3">每周 3 次</option><option value="4">每周 4 次</option><option value="5">每周 5 次</option></select></label>
+            <label>训练重点<input value={draft.focus} onChange={(event) => setDraft((current) => ({ ...current, focus: event.target.value }))} /></label>
           </div>
           <div className="plan-day-list">
-            <PlanDay index="01" title="下肢力量与髋稳定" duration="70 分钟" exercises={["高脚杯深蹲 · 4×10", "罗马尼亚硬拉 · 4×10", "保加利亚分腿蹲 · 3×10", "死虫式 · 3×12"]} />
-            <PlanDay index="02" title="上肢拉力与肩胛控制" duration="65 分钟" exercises={["高位下拉 · 4×10", "坐姿划船 · 4×12", "面拉 · 3×15", "农夫行走 · 4×30m"]} />
-            <PlanDay index="03" title="全身整合与心肺" duration="60 分钟" exercises={["壶铃硬拉 · 4×12", "台阶蹬踏 · 3×12", "雪橇推 · 6×20m", "低强度有氧 · 15min"]} />
+            {draft.days.map((day, index) => <PlanDay key={day.id} index={String(index + 1).padStart(2, "0")} day={day} onChange={(next) => updateDay(index, next)} onRemove={() => setDraft((current) => ({ ...current, days: current.days.filter((_, dayIndex) => dayIndex !== index) }))} />)}
+            <button type="button" className="add-plan-day" onClick={() => setDraft((current) => ({ ...current, days: [...current.days, { id: `day-${Date.now()}`, title: "新训练日", duration: "60 分钟", exercises: ["新动作 · 3×10"] }] }))}><Plus size={17} /> 新增训练日</button>
           </div>
           <div className="plan-save-row"><span><AlertTriangle size={17} /> 若膝部不适超过 3/10，停止冲击动作并重新评估。</span><button className="button button-primary" type="submit"><Save size={17} /> 保存并发布给会员</button></div>
         </form>
       </Card>
       <div className="side-stack">
         <Card><SectionTitle title="设计依据" /><div className="evidence-compact"><p><Activity size={18} /><span><b>恢复评分</b><small>{member.recovery} / 100</small></span></p><p><Target size={18} /><span><b>会员目标</b><small>{member.goal}</small></span></p><p><CalendarCheck size={18} /><span><b>出勤率</b><small>{member.attendance}%</small></span></p></div></Card>
-        <Card className="coach-note-panel"><SectionTitle title="教练备注" /><textarea defaultValue="动作质量优先，训练中保持 RPE 7–8。根据当天恢复状态决定是否增加最后一组。" rows={7} /><button className="button button-secondary full" onClick={() => notify("教练备注已保存")}>保存备注</button></Card>
+        <Card className="coach-note-panel"><SectionTitle title="教练备注" /><textarea value={draft.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))} rows={7} /><small>备注会随训练方案一起自动保存。</small></Card>
       </div>
     </div>
   );
 }
 
-function NutritionDesigner({ member, notify }: { member: (typeof memberRows)[number]; notify: (message: string, tone?: "success" | "info" | "warning") => void }) {
+function NutritionDesigner({ member, plan, onSave }: { member: CoachMember; plan: NutritionPlan; onSave: (plan: NutritionPlan) => void }) {
+  const [draft, setDraft] = useState<NutritionPlan>(() => JSON.parse(JSON.stringify(plan)) as NutritionPlan);
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    notify(`${member.name} 的饮食方案已保存`);
+    onSave({ ...draft, updatedAt: new Date().toISOString().slice(0, 10) });
   }
   return (
     <div className="coach-design-grid">
       <Card className="span-2">
-        <SectionTitle title={`${member.name} · 饮食方案`} action={<span className="pill">武汉饮食习惯已考虑</span>} />
+        <SectionTitle title={`${member.name} · 饮食方案`} action={<span className="pill">鄂州饮食习惯已考虑</span>} />
         <form onSubmit={save} className="nutrition-designer-form">
           <div className="nutrition-targets">
-            <label>每日热量<input type="number" defaultValue="1800" /><small>kcal</small></label>
-            <label>蛋白质<input type="number" defaultValue="120" /><small>g</small></label>
-            <label>碳水<input type="number" defaultValue="180" /><small>g</small></label>
-            <label>脂肪<input type="number" defaultValue="60" /><small>g</small></label>
+            <label>每日热量<input type="number" value={draft.calories} onChange={(event) => setDraft((current) => ({ ...current, calories: Number(event.target.value) }))} /><small>kcal</small></label>
+            <label>蛋白质<input type="number" value={draft.protein} onChange={(event) => setDraft((current) => ({ ...current, protein: Number(event.target.value) }))} /><small>g</small></label>
+            <label>碳水<input type="number" value={draft.carbs} onChange={(event) => setDraft((current) => ({ ...current, carbs: Number(event.target.value) }))} /><small>g</small></label>
+            <label>脂肪<input type="number" value={draft.fat} onChange={(event) => setDraft((current) => ({ ...current, fat: Number(event.target.value) }))} /><small>g</small></label>
           </div>
           <div className="coach-meal-plan">
-            {[
-              ["早餐", "07:30", "燕麦粥、鸡蛋、无糖牛奶、蓝莓", "450 kcal"],
-              ["午餐", "12:30", "糙米饭、清蒸鱼、西兰花、菌菇", "550 kcal"],
-              ["加餐", "16:00", "香蕉、无糖酸奶", "200 kcal"],
-              ["晚餐", "19:00", "鸡胸肉、红薯、菠菜、豆腐", "500 kcal"],
-            ].map(([type, time, food, calories]) => <label key={type}><span><b>{type}</b><small>{time}</small></span><input defaultValue={food} /><em>{calories}</em></label>)}
+            {draft.meals.map((meal, index) => <div key={meal.type}><span><b>{meal.type}</b><input className="meal-time-input" aria-label={`${meal.type}时间`} type="time" value={meal.time} onChange={(event) => setDraft((current) => ({ ...current, meals: current.meals.map((item, mealIndex) => mealIndex === index ? { ...item, time: event.target.value } : item) }))} /></span><input aria-label={`${meal.type}内容`} value={meal.food} onChange={(event) => setDraft((current) => ({ ...current, meals: current.meals.map((item, mealIndex) => mealIndex === index ? { ...item, food: event.target.value } : item) }))} /><label className="meal-calorie-field"><input aria-label={`${meal.type}热量`} type="number" value={meal.calories} onChange={(event) => setDraft((current) => ({ ...current, meals: current.meals.map((item, mealIndex) => mealIndex === index ? { ...item, calories: Number(event.target.value) } : item) }))} /><em>kcal</em></label></div>)}
           </div>
-          <label className="full-note">执行提醒<textarea rows={4} defaultValue="训练日前后优先保证碳水；武汉口味可保留清淡汤类，减少重油、含糖饮料与夜宵。" /></label>
+          <label className="full-note">执行提醒<textarea rows={4} value={draft.reminder} onChange={(event) => setDraft((current) => ({ ...current, reminder: event.target.value }))} /></label>
           <button className="button button-primary" type="submit"><Save size={17} /> 保存并发布给会员</button>
         </form>
       </Card>
@@ -390,13 +539,19 @@ function NutritionDesigner({ member, notify }: { member: (typeof memberRows)[num
 function BodyFeedback({
   member,
   data,
-  notify,
+  feedbacks,
+  onSave,
 }: {
-  member: (typeof memberRows)[number];
+  member: CoachMember;
   data: BodyMetric[];
-  notify: (message: string, tone?: "success" | "info" | "warning") => void;
+  feedbacks: PortalState["bodyFeedbacks"];
+  onSave: (feedback: { summary: string; nextFocus: string; risk: "良好" | "注意" | "需关注" }) => void;
 }) {
   const [metric, setMetric] = useState<"weight" | "bodyFat" | "muscle">("weight");
+  const latestFeedback = feedbacks.at(-1);
+  const [summary, setSummary] = useState(latestFeedback?.summary ?? "本周体重和体脂下降节奏稳定，肌肉量保持良好。下一阶段继续以动作质量和稳定训练频率为主。");
+  const [nextFocus, setNextFocus] = useState(latestFeedback?.nextFocus ?? "睡眠时长、膝部疼痛评分、训练后恢复");
+  const [risk, setRisk] = useState<"良好" | "注意" | "需关注">(latestFeedback?.risk ?? (member.risk as "良好" | "注意" | "需关注"));
   const latest = data.at(-1);
   const labels = { weight: "体重", bodyFat: "体脂率", muscle: "肌肉量" };
   return (
@@ -414,10 +569,11 @@ function BodyFeedback({
         </Card>
         <Card className="feedback-form-card">
           <SectionTitle title="教练身体反馈" />
-          <div className="risk-summary"><span className={`risk-badge risk-${member.risk}`}>{member.risk}</span><p>恢复评分较上周上升 6 分，可维持正常训练负荷；继续观察睡眠与膝部反馈。</p></div>
-          <label>本周反馈<textarea rows={7} defaultValue="本周体重和体脂下降节奏稳定，肌肉量保持良好。下一阶段继续以动作质量和稳定训练频率为主。" /></label>
-          <label>下周观察重点<input defaultValue="睡眠时长、膝部疼痛评分、训练后恢复" /></label>
-          <button className="button button-primary full" onClick={() => notify(`${member.name} 的身体反馈已保存并发布`)}><Send size={17} /> 保存并发布给会员</button>
+          <div className="risk-summary"><label>风险等级<select value={risk} onChange={(event) => setRisk(event.target.value as typeof risk)}><option>良好</option><option>注意</option><option>需关注</option></select></label><p>恢复评分较上周上升 6 分，可维持正常训练负荷；继续观察睡眠与膝部反馈。</p></div>
+          <label>本周反馈<textarea rows={7} value={summary} onChange={(event) => setSummary(event.target.value)} /></label>
+          <label>下周观察重点<input value={nextFocus} onChange={(event) => setNextFocus(event.target.value)} /></label>
+          <button className="button button-primary full" onClick={() => onSave({ summary, nextFocus, risk })}><Send size={17} /> 保存并发布给会员</button>
+          {feedbacks.length ? <div className="feedback-history"><b>历史反馈</b>{feedbacks.slice(-3).reverse().map((feedback) => <p key={feedback.id}><span>{feedback.date}</span>{feedback.summary}</p>)}</div> : null}
         </Card>
       </div>
     </div>
@@ -428,8 +584,18 @@ function MemberServiceCard({ icon: Icon, title, text, note, onClick }: { icon: t
   return <button className="card member-service-card" onClick={onClick}><span><Icon size={22} /></span><div><h3>{title}</h3><p>{text}</p><small>{note}</small></div><ArrowRight size={18} /></button>;
 }
 
-function PlanDay({ index, title, duration, exercises }: { index: string; title: string; duration: string; exercises: string[] }) {
-  return <section><header><span>{index}</span><div><h3>{title}</h3><small>{duration}</small></div><button type="button" className="text-button">编辑</button></header><div>{exercises.map((exercise) => <label key={exercise}><Check size={14} /><input defaultValue={exercise} /></label>)}</div></section>;
+function PlanDay({
+  index,
+  day,
+  onChange,
+  onRemove,
+}: {
+  index: string;
+  day: TrainingPlan["days"][number];
+  onChange: (day: TrainingPlan["days"][number]) => void;
+  onRemove: () => void;
+}) {
+  return <section><header><span>{index}</span><div><input className="plan-day-title" value={day.title} onChange={(event) => onChange({ ...day, title: event.target.value })} aria-label={`训练日 ${index} 标题`} /><input className="plan-day-duration" value={day.duration} onChange={(event) => onChange({ ...day, duration: event.target.value })} aria-label={`训练日 ${index} 时长`} /></div><button type="button" className="text-button danger-text" onClick={onRemove}><Trash2 size={14} /> 删除</button></header><div>{day.exercises.map((exercise, exerciseIndex) => <label key={`${day.id}-${exerciseIndex}`}><Check size={14} /><input value={exercise} onChange={(event) => onChange({ ...day, exercises: day.exercises.map((item, indexValue) => indexValue === exerciseIndex ? event.target.value : item) })} /><button type="button" className="icon-button" aria-label={`删除动作 ${exercise}`} onClick={() => onChange({ ...day, exercises: day.exercises.filter((_, indexValue) => indexValue !== exerciseIndex) })}><X size={14} /></button></label>)}</div><button type="button" className="text-button" onClick={() => onChange({ ...day, exercises: [...day.exercises, "新动作 · 3×10"] })}><Plus size={14} /> 添加动作</button></section>;
 }
 
 function QualityRow({ label, value }: { label: string; value: number }) {

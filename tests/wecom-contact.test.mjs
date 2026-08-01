@@ -28,6 +28,53 @@ function response() {
   };
 }
 
+function statePool(initialState) {
+  let state = structuredClone(initialState);
+  const audits = [];
+  return {
+    get state() {
+      return state;
+    },
+    audits,
+    async query(sql, params = []) {
+      const text = String(sql);
+      if (text.includes("SELECT u.id,u.name,p.state_json")) {
+        if (params[0] !== "member-1" || params[1] !== "coach-user-1") {
+          return { rows: [] };
+        }
+        return { rows: [{ id: "member-1", name: "测试会员", state_json: state }] };
+      }
+      if (text.includes("INSERT INTO portal_state")) {
+        assert.equal(params[0], "member-1");
+        state = structuredClone(params[1]);
+        return { rows: [] };
+      }
+      if (text.includes("INSERT INTO audit_log")) {
+        audits.push({ actor: params[1], action: params[2], detail: params[3] });
+        return { rows: [] };
+      }
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+}
+
+async function runHermesOperation(service, body) {
+  const res = response();
+  await service.handleInternalTool(
+    request({
+      address: "127.0.0.1",
+      token: process.env.HERMES_TOOL_TOKEN,
+      body: {
+        coach_userid: "coach-user-1",
+        member_id: "member-1",
+        ...body,
+      },
+    }),
+    res,
+  );
+  return { response: res, result: JSON.parse(res.body) };
+}
+
 test("Hermes member tools reject non-loopback callers before database access", async () => {
   process.env.HERMES_TOOL_TOKEN = "test-tool-token-that-is-long-enough";
   process.env.WECOM_ALLOWED_COACH_USERIDS = "coach-user-1";
@@ -74,6 +121,164 @@ test("Hermes member tools reject invalid bearer and unauthorized coach userid", 
       }),
       badCoach,
     ),
-    /没有 Hermes 管理工具权限/,
+    /没有 AI 管理工具权限/,
   );
+});
+
+test("Hermes can add and delete a private session for an exact bound member", async () => {
+  process.env.HERMES_TOOL_TOKEN = "website-control-tool-token";
+  process.env.WECOM_ALLOWED_COACH_USERIDS = "coach-user-1";
+  const pool = statePool({
+    profile: { id: "member-1", name: "测试会员" },
+    bookings: [],
+  });
+  const service = createWecomContactService({ pool });
+  const added = await runHermesOperation(service, {
+    operation: "add_private_session",
+    day: "周五",
+    date: "7/31",
+    time: "18:00–19:00",
+    focus: "下肢力量",
+    request_id: "member-1-20260731-1800",
+  });
+  assert.equal(added.response.status, 201);
+  assert.equal(added.result.sync, "网站页面已自动同步");
+  assert.equal(pool.state.bookings.length, 1);
+  assert.equal(pool.state.bookings[0].focus, "下肢力量");
+
+  const replayed = await runHermesOperation(service, {
+    operation: "add_private_session",
+    day: "周五",
+    date: "7/31",
+    time: "18:00–19:00",
+    focus: "下肢力量",
+    request_id: "member-1-20260731-1800",
+  });
+  assert.equal(replayed.result.idempotent_replay, true);
+  assert.equal(pool.state.bookings.length, 1);
+
+  const updated = await runHermesOperation(service, {
+    operation: "update_private_session",
+    session_id: pool.state.bookings[0].id,
+    day: "周六",
+    date: "8/1",
+    time: "16:00–17:00",
+    focus: "核心稳定",
+    status: "待确认",
+  });
+  assert.equal(updated.response.status, 200);
+  assert.equal(pool.state.bookings[0].focus, "核心稳定");
+  assert.equal(pool.state.bookings[0].status, "待确认");
+
+  const deleted = await runHermesOperation(service, {
+    operation: "delete_private_session",
+    session_id: pool.state.bookings[0].id,
+  });
+  assert.equal(deleted.response.status, 200);
+  assert.equal(pool.state.bookings.length, 0);
+  assert.deepEqual(pool.audits.map((item) => item.action), [
+    "hermes_private_session_added",
+    "hermes_private_session_updated",
+    "hermes_private_session_deleted",
+  ]);
+});
+
+test("Hermes updates training, nutrition, body feedback and member profile by exact member_id", async () => {
+  process.env.HERMES_TOOL_TOKEN = "website-control-tool-token";
+  process.env.WECOM_ALLOWED_COACH_USERIDS = "coach-user-1";
+  const pool = statePool({
+    profile: { id: "member-1", name: "测试会员", plan: "基础计划" },
+    bookings: [],
+    trainingPlan: {},
+    nutritionPlan: {},
+    bodyFeedbacks: [],
+  });
+  const service = createWecomContactService({ pool });
+
+  const training = await runHermesOperation(service, {
+    operation: "update_training_plan",
+    phase: "第 2 周",
+    goal: "改善圆肩",
+    frequency: 4,
+    focus: "肩胛控制",
+    note: "动作质量优先",
+    days: [{
+      id: "day-1",
+      title: "上肢拉力",
+      duration: "65 分钟",
+      exercises: ["高位下拉 · 4×10", "面拉 · 3×15"],
+    }],
+  });
+  assert.equal(training.response.status, 200);
+  assert.equal(training.result.sync, "网站页面已自动同步");
+  assert.equal(pool.state.trainingPlan.goal, "改善圆肩");
+  assert.equal(pool.state.trainingPlan.frequency, 4);
+  assert.deepEqual(pool.state.trainingPlan.days[0].exercises, ["高位下拉 · 4×10", "面拉 · 3×15"]);
+
+  const nutrition = await runHermesOperation(service, {
+    operation: "update_nutrition_plan",
+    calories: 2100,
+    protein: 145,
+    carbs: 230,
+    fat: 65,
+    reminder: "训练日增加复合碳水",
+    meals: [{
+      type: "午餐",
+      time: "12:30",
+      food: "米饭、清蒸鱼和青菜",
+      calories: 650,
+    }],
+  });
+  assert.equal(nutrition.response.status, 200);
+  assert.equal(nutrition.result.sync, "网站页面已自动同步");
+  assert.equal(pool.state.nutritionPlan.calories, 2100);
+  assert.equal(pool.state.nutritionPlan.meals[0].food, "米饭、清蒸鱼和青菜");
+
+  const feedback = await runHermesOperation(service, {
+    operation: "add_body_feedback",
+    summary: "肩颈紧张度下降，深蹲稳定性提高",
+    next_focus: "继续观察右侧肩胛控制",
+    risk: "注意",
+  });
+  assert.equal(feedback.response.status, 201);
+  assert.equal(feedback.result.sync, "网站页面已自动同步");
+  assert.equal(pool.state.bodyFeedbacks.length, 1);
+  assert.equal(pool.state.bodyFeedbacks[0].nextFocus, "继续观察右侧肩胛控制");
+
+  const profile = await runHermesOperation(service, {
+    operation: "update_member_profile",
+    plan: "体态改善 · 私教 24 节",
+    expires_at: "2027-07-31",
+    level: "金卡会员",
+  });
+  assert.equal(profile.response.status, 200);
+  assert.equal(profile.result.sync, "网站页面已自动同步");
+  assert.deepEqual(
+    {
+      plan: pool.state.profile.plan,
+      expiresAt: pool.state.profile.expiresAt,
+      level: pool.state.profile.level,
+    },
+    {
+      plan: "体态改善 · 私教 24 节",
+      expiresAt: "2027-07-31",
+      level: "金卡会员",
+    },
+  );
+  assert.deepEqual(pool.audits.map((item) => item.action), [
+    "hermes_training_plan_updated",
+    "hermes_nutrition_plan_updated",
+    "hermes_body_feedback_added",
+    "hermes_member_profile_updated",
+  ]);
+
+  await assert.rejects(
+    runHermesOperation(service, {
+      operation: "update_member_profile",
+      member_id: "member-other",
+      plan: "不应写入",
+    }),
+    /未找到该 member_id/,
+  );
+  assert.equal(pool.state.profile.plan, "体态改善 · 私教 24 节");
 });

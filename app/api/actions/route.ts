@@ -58,14 +58,49 @@ export async function POST(request: Request) {
         .bind(metric.id, portalUserId, metric.date, metric.weight, metric.bodyFat, metric.muscle, metric.waist).run();
       return Response.json({ ok: true, state });
     } else if (action === "booking") {
-      const id = String(payload.id ?? "");
-      const booking = state.bookings.find((item) => item.id === id);
-      if (!booking) return Response.json({ error: "找不到预约" }, { status: 404 });
-      booking.status = booking.status === "可预约" ? "已预约" : "已取消";
+      return Response.json({ error: "会员端不提供自行排课，课程由教练统一安排" }, { status: 403 });
+    } else if (action === "coach_booking_add") {
+      const incoming = payload.booking && typeof payload.booking === "object" ? payload.booking as Record<string, unknown> : {};
+      const booking = {
+        id: String(incoming.id ?? `booking-${Date.now()}`),
+        day: String(incoming.day ?? ""),
+        date: String(incoming.date ?? ""),
+        time: String(incoming.time ?? ""),
+        title: "一对一私教",
+        coach: "邵教练",
+        focus: String(incoming.focus ?? "一对一私教"),
+        status: (["已完成", "已预约", "待确认"].includes(String(incoming.status)) ? String(incoming.status) : "已预约") as "已完成" | "已预约" | "待确认",
+      };
+      if (!booking.day || !booking.date || !/^\d{2}:\d{2}[–-]\d{2}:\d{2}$/.test(booking.time)) return Response.json({ error: "课程日期或时间无效" }, { status: 400 });
+      state.bookings.push(booking);
       db = await savePortalState(state);
-      await db.prepare("INSERT INTO bookings (id, user_id, coach_id, title, starts_at, status) VALUES (?, ?, 'coach-shao', ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status")
+      await db.prepare("INSERT INTO bookings (id, user_id, coach_id, title, starts_at, status) VALUES (?, ?, 'coach-shao', ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,starts_at=excluded.starts_at,status=excluded.status")
         .bind(booking.id, portalUserId, booking.title, `${booking.date} ${booking.time}`, booking.status).run();
       return Response.json({ ok: true, state });
+    } else if (action === "coach_booking_delete") {
+      const id = String(payload.id ?? "");
+      if (!state.bookings.some((item) => item.id === id)) return Response.json({ error: "找不到该课程" }, { status: 404 });
+      state.bookings = state.bookings.filter((item) => item.id !== id);
+      db = await savePortalState(state);
+      await db.prepare("DELETE FROM bookings WHERE id = ?").bind(id).run();
+      return Response.json({ ok: true, state });
+    } else if (action === "coach_training_plan") {
+      const plan = payload.plan;
+      if (!plan || typeof plan !== "object" || !Array.isArray((plan as { days?: unknown }).days)) return Response.json({ error: "训练方案格式无效" }, { status: 400 });
+      state.trainingPlan = plan as typeof state.trainingPlan;
+    } else if (action === "coach_nutrition_plan") {
+      const plan = payload.plan;
+      if (!plan || typeof plan !== "object" || !Array.isArray((plan as { meals?: unknown }).meals)) return Response.json({ error: "饮食方案格式无效" }, { status: 400 });
+      state.nutritionPlan = plan as typeof state.nutritionPlan;
+    } else if (action === "coach_body_feedback") {
+      const feedback = payload.feedback;
+      if (!feedback || typeof feedback !== "object") return Response.json({ error: "身体反馈格式无效" }, { status: 400 });
+      state.bodyFeedbacks = [...(state.bodyFeedbacks ?? []), feedback as typeof state.bodyFeedbacks[number]].slice(-100);
+    } else if (action === "coach_member_profile") {
+      const profile = payload.profile && typeof payload.profile === "object" ? payload.profile as Record<string, unknown> : {};
+      for (const key of ["plan", "expiresAt", "level"] as const) {
+        if (typeof profile[key] === "string" && profile[key]) state.profile[key] = String(profile[key]).slice(0, 120);
+      }
     } else if (action === "suggestion") {
       const id = String(payload.id ?? "");
       const status = String(payload.status ?? "");

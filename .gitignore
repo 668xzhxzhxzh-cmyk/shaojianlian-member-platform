@@ -45,5 +45,6 @@ next-env.d.ts
 /outputs/
 /work/
 /artifacts/
+/.release-build/
 __pycache__/
 *.py[cod]
