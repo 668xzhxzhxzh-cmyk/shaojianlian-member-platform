@@ -36,6 +36,9 @@ verify_release_tree() {
   test -d "$root/node_modules"
   test -f "$root/deployment/shao-web.service"
   test -f "$root/deployment/shao-api.service"
+  test -f "$root/deployment/shao-backup.service"
+  test -f "$root/deployment/shao-backup.timer"
+  test -f "$root/scripts/backup-postgres.sh"
   if find "$root" -type f \( -name '.env' -o -name '.env.*' -o -name '*.pem' -o -name 'id_rsa' -o -name 'id_ed25519' \) -print -quit | grep -q .; then
     echo "运行包包含环境文件或私钥，拒绝继续。" >&2
     return 1
@@ -189,6 +192,11 @@ mv "$incoming/release" "$release_dir"
 rmdir "$incoming"
 chown -R shaoapp:shaoapp "$release_dir"
 
+# 数据库备份脚本位于持久目录，不随 current 回滚而消失。每次发布都从
+# 已校验的不可变运行包刷新它，确保定时任务与仓库版本一致。
+install -d -m 0755 "$base_dir/scripts"
+install -m 0755 "$release_dir/scripts/backup-postgres.sh" "$base_dir/scripts/backup-postgres.sh"
+
 echo "在候选端口 3300/8988 启动新版本，不影响 Nginx 的 3000/8788 现网端口。"
 candidate_env="$work/candidate-api.env"
 awk '!/^API_HOST=/ && !/^API_PORT=/' "$base_dir/.env" > "$candidate_env"
@@ -243,7 +251,10 @@ esac
 
 install -m 0644 "$release_dir/deployment/shao-web.service" /etc/systemd/system/shao-web.service
 install -m 0644 "$release_dir/deployment/shao-api.service" /etc/systemd/system/shao-api.service
+install -m 0644 "$release_dir/deployment/shao-backup.service" /etc/systemd/system/shao-backup.service
+install -m 0644 "$release_dir/deployment/shao-backup.timer" /etc/systemd/system/shao-backup.timer
 systemctl daemon-reload
+systemctl enable --now shao-backup.timer
 
 atomic_link "$previous_release" "$base_dir/previous"
 atomic_link "$release_dir" "$base_dir/current"

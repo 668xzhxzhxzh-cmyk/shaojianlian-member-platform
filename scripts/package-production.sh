@@ -40,6 +40,7 @@ cp -a "$repo_root/deployment" "$stage/release/deployment"
 mkdir -p "$stage/release/scripts"
 cp "$repo_root/scripts/release-health-check.sh" "$stage/release/scripts/"
 cp "$repo_root/scripts/rollback-release.sh" "$stage/release/scripts/"
+cp "$repo_root/scripts/backup-postgres.sh" "$stage/release/scripts/"
 for optional_dir in db drizzle; do
   if [[ -d "$repo_root/$optional_dir" ]]; then
     cp -a "$repo_root/$optional_dir" "$stage/release/$optional_dir"
