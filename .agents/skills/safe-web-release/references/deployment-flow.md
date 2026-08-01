@@ -20,7 +20,7 @@
 12. **旧流程回滚**：旧 `.next` 和 `node_modules` 目录仍存在，但没有完整保存 API 源码、service unit 与统一 manifest。理论上可手工恢复 Web 文件并将 Git 切回旧 commit，但完整回滚没有实测，必须标记“待确认”，不能声称已经具备完整自动回滚。
 13. **Hermes 连接**：服务器唯一 Hermes gateway 监听 127.0.0.1:8642；Hermes Desktop backend 监听 127.0.0.1:9119。Windows 桌面端通过受限 SSH 用户和本地端口转发连接 9119，使用服务器会话 Token。`shao-coach` MCP 位于 `/var/lib/hermes/.hermes/tools/shao_coach_mcp.py`，调用 `http://127.0.0.1:8788/api/internal/hermes/tools`。
 14. **环境变量位置**：网站/API 生产变量仅在 `/opt/shao-coach/.env`；Web 公共地址变量在 `/etc/default/shao-coach-web`；DeepSeek、Hermes API、MCP Token、企业微信与桌面会话变量在 `/var/lib/hermes/.hermes/.env`。GitHub 发布所需 SSH 主机、用户和私钥应只在 GitHub Secrets。只记录变量名，不记录值。
-15. **仍需人工**：当前需要人工选择正式部署、提供成功 CI run ID 与 commit SHA；只读检查确认仓库目前没有 Actions Secrets，也没有 `production` Environment，因此 `ECS_HOST`、`ECS_USER`、`ECS_SSH_KEY` 和 required reviewer 尚未配置；域名和 HTTPS 仍未绑定；企业微信客户联系 Secret 的有效配置仍未完成。
+15. **仍需人工**：2026-08-01 已创建 GitHub `production` Environment 并配置 `ECS_HOST`、`ECS_USER`、`ECS_SSH_KEY`；正式部署仍需选择 `DEPLOY` 并提供成功 CI run ID 与 commit SHA。当前没有 required reviewer；域名和 HTTPS 仍未绑定；企业微信客户联系 Secret 的有效配置仍未完成。
 
 ## 固化后的安全流程
 

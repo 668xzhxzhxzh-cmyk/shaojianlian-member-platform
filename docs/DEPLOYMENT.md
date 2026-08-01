@@ -53,7 +53,7 @@ readlink -f /opt/shao-coach/previous
 - `ECS_USER`：部署用户；当前流程需要有管理 systemd 和 `/opt/shao-coach` 的权限。
 - `ECS_SSH_KEY`：对应部署用户的 SSH 私钥。
 
-建议给 GitHub 的 `production` Environment 配置 required reviewer。2026-08-01 的只读检查确认：仓库当前没有 Actions Secrets，也没有 `production` Environment；这些配置必须在第一次正式部署前人工完成。
+2026-08-01 已创建 GitHub `production` Environment，并配置 `ECS_HOST`、`ECS_USER`、`ECS_SSH_KEY`。当前没有 required reviewer；首次正式部署仍由 `workflow_dispatch` 的 `DEPLOY` 确认项保护。
 
 ## 不允许做的事
 

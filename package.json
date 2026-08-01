@@ -16,7 +16,7 @@
     "build:node": "next build --webpack",
     "start:node": "next start",
     "test": "node --test tests/*.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .release-build --ignore-pattern artifacts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate"
   },
