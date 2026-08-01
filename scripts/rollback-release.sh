@@ -54,10 +54,23 @@ atomic_link() {
   mv -Tf "$temp_link" "$link"
 }
 
+wait_for_runtime() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if curl -fsS --max-time 2 http://127.0.0.1:8788/health >/dev/null \
+      && curl -fsS --max-time 2 http://127.0.0.1:3000/ >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
 rollback_failed=0
 atomic_link "$target" "$base_dir/current"
 systemctl restart shao-api.service shao-web.service
-if ! bash "$target/scripts/release-health-check.sh" --public-base http://127.0.0.1 --check-services; then
+if ! wait_for_runtime \
+  || ! bash "$target/scripts/release-health-check.sh" --public-base http://127.0.0.1 --check-services; then
   rollback_failed=1
 fi
 
@@ -65,6 +78,7 @@ if [[ "$rollback_failed" == 1 ]]; then
   echo "目标版本健康检查失败，恢复回滚前版本。" >&2
   atomic_link "$current" "$base_dir/current"
   systemctl restart shao-api.service shao-web.service
+  wait_for_runtime
   bash "$current/scripts/release-health-check.sh" --public-base http://127.0.0.1 --check-services
   exit 1
 fi
