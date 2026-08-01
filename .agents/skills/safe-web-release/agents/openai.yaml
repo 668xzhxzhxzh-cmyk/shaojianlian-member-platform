@@ -1,0 +1,4 @@
+interface:
+  display_name: "安全网站发布"
+  short_description: "安全审计、构建、发布、健康检查及故障回滚本项目网站"
+  default_prompt: "使用 $safe-web-release 审计本次网站变更并准备一次不触碰生产的发布 dry-run。"
