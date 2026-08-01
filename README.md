@@ -72,6 +72,7 @@ Hermes `/var/lib/hermes/.hermes/.env`：
 - 回调 `MsgId` 会写入去重表；企业微信重试不会重复执行 Hermes 管理操作。
 - Hermes 的回复通过自建应用官方 `message/send` 接口回到同一个教练 userid；企业微信客户和未授权成员不会进入 Hermes。
 - 中国内地正式配置必须使用与企业主体匹配且已备案的域名；公网 IP 是随后配置的企业可信 IP，不能代替接收消息域名。
+- 备案、HTTPS、可信 IP 和自建应用凭据都准备好后，使用 Hermes 自带 Python 环境运行 `scripts/configure-wecom-native.py`。脚本不会回显 Secret，会先验证企业微信官方 API 和 Hermes 原生回调，再切换 Nginx；任一步失败都会恢复网站、Hermes 和 Nginx 的原配置。
 
 部署工具：
 
