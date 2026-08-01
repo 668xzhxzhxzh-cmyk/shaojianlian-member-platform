@@ -117,6 +117,20 @@ atomic_link() {
   mv -Tf "$temp_link" "$link"
 }
 
+wait_for_runtime() {
+  local web_url="$1" api_url="$2"
+  local attempt
+  for attempt in $(seq 1 30); do
+    if curl -fsS --max-time 2 "$api_url/health" >/dev/null \
+      && curl -fsS --max-time 2 "$web_url/" >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "运行时在 60 秒内未就绪：web=$web_url api=$api_url" >&2
+  return 1
+}
+
 on_exit() {
   local status=$?
   trap - EXIT
@@ -127,6 +141,7 @@ on_exit() {
     atomic_link "$previous_release" "$base_dir/current"
     systemctl daemon-reload
     systemctl restart shao-api.service shao-web.service
+    wait_for_runtime http://127.0.0.1:3000 http://127.0.0.1:8788 || true
     bash "$previous_release/scripts/release-health-check.sh" \
       --public-base http://127.0.0.1 --check-services || true
   fi
@@ -192,13 +207,7 @@ systemd-run --quiet --collect --service-type=exec --unit "$web_unit" \
   --setenv=NODE_ENV=production --setenv=HOSTNAME=127.0.0.1 --setenv=PORT=3300 \
   /usr/bin/node "$release_dir/web/server.js"
 
-for _ in $(seq 1 30); do
-  if curl -fsS --max-time 2 http://127.0.0.1:8988/health >/dev/null \
-    && curl -fsS --max-time 2 http://127.0.0.1:3300/ >/dev/null; then
-    break
-  fi
-  sleep 2
-done
+wait_for_runtime http://127.0.0.1:3300 http://127.0.0.1:8988
 bash "$release_dir/scripts/release-health-check.sh" \
   --web-base http://127.0.0.1:3300 \
   --api-base http://127.0.0.1:8988
@@ -242,6 +251,7 @@ switched=1
 
 systemctl restart shao-api.service
 systemctl restart shao-web.service
+wait_for_runtime http://127.0.0.1:3000 http://127.0.0.1:8788
 bash "$release_dir/scripts/release-health-check.sh" \
   --public-base http://127.0.0.1 --check-services
 
