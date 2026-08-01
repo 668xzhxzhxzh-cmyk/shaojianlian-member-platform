@@ -27,7 +27,6 @@ import {
   Trophy,
   UserRoundCheck,
   Utensils,
-  X,
 } from "lucide-react";
 import { trainingExercises, type Booking } from "@/lib/portal-data";
 import { usePortal } from "./portal-context";

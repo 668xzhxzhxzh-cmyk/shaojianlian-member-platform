@@ -1151,6 +1151,74 @@ button.table-row:hover { background: #faf9f4; }
   .coach-design-grid .span-2 { grid-column: auto; }
 }
 
+@media (max-width: 1100px) {
+  .inline-editor { grid-template-columns: 1fr; }
+  .coach-overview-grid, .coach-members-layout, .coach-design-grid { grid-template-columns: 1fr; }
+  .member-context-bar { grid-template-columns: 1fr 1fr; }
+  .member-context-metrics { grid-column: span 2; }
+  .coach-week-board { overflow: visible; }
+  .coach-schedule-card { overflow-x: auto; }
+}
+
+@media (max-width: 720px) {
+  .stat-card-link { min-height: 126px; }
+  .inline-editor { scroll-margin-top: 74px; gap: 20px; padding: 19px 15px; }
+  .inline-editor form > .button { width: 100%; }
+  .booking-calendar-card { padding: 14px 10px; }
+  .booking-toolbar-new { gap: 12px; }
+  .period-switcher { width: 100%; }
+  .period-switcher strong { flex: 1; font-size: 12px; }
+  .private-only { align-self: center; }
+  .booking-grid-scroll { display: none; }
+  .booking-mobile-agenda { display: block; }
+  .booking-day-strip { display: grid; grid-template-columns: repeat(7,1fr); gap: 4px; padding: 4px 0 13px; border-bottom: 1px solid var(--line); }
+  .booking-day-strip button { position: relative; min-height: 57px; display: grid; place-items: center; align-content: center; gap: 1px; border: 0; border-radius: 10px; background: transparent; }
+  .booking-day-strip button span { color: var(--muted); font-size: 9px; }
+  .booking-day-strip button b { font: 15px Georgia,serif; }
+  .booking-day-strip button.active { background: var(--green); color: white; }
+  .booking-day-strip button.active span { color: #dfe5d8; }
+  .booking-day-strip button i { position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--amber); }
+  .mobile-agenda-list { display: grid; }
+  .mobile-agenda-list > div { min-height: 62px; display: grid; grid-template-columns: 55px 1fr; align-items: start; gap: 9px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+  .mobile-agenda-list > div > time { padding-top: 6px; color: var(--muted); font: 11px Georgia,serif; }
+  .mobile-agenda-list > div > span { padding-top: 6px; color: #a3a49e; font-size: 10px; }
+  .mobile-agenda-list .private-session { min-height: 70px; }
+  .booking-month.booking-month-new { grid-template-columns: repeat(7,minmax(0,1fr)); }
+  .booking-month-new .month-empty, .booking-month-new > button { min-height: 72px; padding: 6px 4px; }
+  .booking-month-new > button:nth-child(4n) { border-right: 1px solid var(--line); }
+  .booking-month-new > button:nth-child(7n) { border-right: 0; }
+  .booking-month-new > button > span { font-size: 13px; }
+  .booking-month-new > button > b { font-size: 8px; line-height: 1.2; }
+  .booking-month-new > button > small { display: none; }
+  .booking-month-new > button > em { max-width: 100%; padding: 1px 3px; overflow: hidden; font-size: 7px; white-space: nowrap; }
+  .booking-month-head span { padding: 6px 1px; font-size: 9px; }
+  .coach-hero-row, .coach-section-heading { align-items: stretch; flex-direction: column; gap: 13px; }
+  .coach-hero-row .inline-actions, .coach-section-heading .inline-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .coach-hero-row .inline-actions .button { padding: 0 10px; }
+  .coach-overview-grid { gap: 10px; }
+  .coach-overview-grid .span-2 { grid-column: auto; }
+  .coach-timeline > button { grid-template-columns: 45px 10px 30px 1fr auto; gap: 7px; }
+  .coach-timeline > button > em { display: none; }
+  .coach-timeline > button > svg { display: none; }
+  .member-snapshot-grid { grid-template-columns: 1fr; }
+  .member-context-bar { grid-template-columns: 1fr; gap: 14px; padding: 15px; }
+  .member-context-metrics { grid-column: auto; grid-template-columns: 1fr 1fr; }
+  .member-context-metrics span:first-child { grid-column: span 2; }
+  .member-context-bar > .text-button { justify-self: start; }
+  .member-directory-head > div { grid-template-columns: 1fr; }
+  .member-directory-list > button { grid-template-columns: 38px 1fr auto; }
+  .member-directory-list > button > svg { display: none; }
+  .record-hero-stats { grid-template-columns: 1fr 1fr; }
+  .member-service-grid { grid-template-columns: 1fr; }
+  .plan-summary-grid, .nutrition-targets { grid-template-columns: 1fr 1fr; }
+  .plan-summary-grid label:last-child { grid-column: span 2; }
+  .plan-day-list section > div { grid-template-columns: 1fr; }
+  .plan-save-row { align-items: stretch; flex-direction: column; }
+  .coach-meal-plan label { grid-template-columns: 70px 1fr; }
+  .coach-meal-plan label > em { grid-column: 2; text-align: left; }
+  .coach-design-grid .span-2 { grid-column: auto; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; scroll-behavior: auto !important; }
 }
