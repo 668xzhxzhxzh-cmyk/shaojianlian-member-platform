@@ -295,6 +295,20 @@ def list_customer_ids() -> dict[str, Any]:
 
 
 @mcp.tool()
+def create_member_binding_qr(member_id: str) -> dict[str, Any]:
+    """为精确 member_id 生成企业微信客户联系专属二维码。
+
+    会员用普通微信扫码添加教练后，企业微信官方回调会自动绑定
+    member_id、external_userid 与当前教练 userid；禁止按昵称匹配。
+    """
+
+    return _call(
+        "create_member_binding_qr",
+        member_id=member_id,
+    )
+
+
+@mcp.tool()
 def bind_member_external_userid(
     member_id: str,
     external_userid: str,

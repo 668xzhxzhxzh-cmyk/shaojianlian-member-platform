@@ -96,6 +96,20 @@ export const memberWecomBindings = sqliteTable("member_wecom_bindings", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const wecomBindingLinks = sqliteTable("wecom_binding_links", {
+  stateToken: text("state_token").primaryKey(),
+  memberId: text("member_id").notNull(),
+  coachUserid: text("coach_userid").notNull(),
+  configId: text("config_id").notNull(),
+  qrCode: text("qr_code").notNull(),
+  status: text("status").notNull().default("pending"),
+  externalUserid: text("external_userid"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  expiresAt: text("expires_at").notNull(),
+  consumedAt: text("consumed_at"),
+});
+
 export const wecomSendTasks = sqliteTable("wecom_send_tasks", {
   id: text("id").primaryKey(),
   memberId: text("member_id").notNull(),

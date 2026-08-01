@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 const WECOM_API_ORIGIN = "https://qyapi.weixin.qq.com";
 const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -75,6 +75,10 @@ export function createWecomContactService({ pool }) {
     if (operation === "list_customer_ids") {
       const customers = await listCustomerIds(coachUserId);
       return sendJson(response, 200, { customers });
+    }
+    if (operation === "create_member_binding_qr") {
+      const bindingQr = await createMemberBindingQr(body.member_id, coachUserId);
+      return sendJson(response, 201, { binding_qr: bindingQr });
     }
     if (operation === "bind_member_external_userid") {
       const binding = await bindMemberExternalUserId(
@@ -365,6 +369,194 @@ export function createWecomContactService({ pool }) {
     }));
   }
 
+  async function createMemberBindingQr(rawMemberId, coachUserId) {
+    requireContactConfigured();
+    const memberId = normalizeId(rawMemberId, "member_id");
+    const memberResult = await pool.query(
+      `SELECT u.id,u.name,u.status,b.coach_userid,b.external_userid
+       FROM users u
+       LEFT JOIN member_wecom_bindings b ON b.member_id=u.id AND b.status='active'
+       WHERE u.id=$1 AND u.role='member'
+       LIMIT 1`,
+      [memberId],
+    );
+    const member = memberResult.rows[0];
+    if (!member || member.status !== "active") throw publicError(404, "member_id 不存在或会员已停用");
+    if (member.coach_userid && member.coach_userid !== coachUserId) {
+      throw publicError(403, "该会员已归属其他教练");
+    }
+    if (member.external_userid) {
+      throw publicError(409, "该会员已完成企业微信绑定，无需重复生成二维码");
+    }
+
+    const stateToken = `sb_${randomBytes(15).toString("base64url")}`;
+    const expiresAt = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString();
+    const contactWay = await callWecom("/cgi-bin/externalcontact/add_contact_way", {
+      method: "POST",
+      body: {
+        type: 1,
+        scene: 2,
+        style: 1,
+        remark: "会员自动绑定",
+        skip_verify: true,
+        state: stateToken,
+        user: [coachUserId],
+      },
+    });
+    const qrCode = String(contactWay.qr_code || "").trim();
+    const configId = String(contactWay.config_id || "").trim();
+    if (!qrCode || !configId) throw publicError(502, "企业微信未返回可用的客户联系二维码");
+
+    const client = typeof pool.connect === "function" ? await pool.connect() : pool;
+    try {
+      if (client !== pool) await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO member_wecom_bindings (member_id,external_userid,coach_userid,status,updated_at)
+         VALUES ($1,NULL,$2,'active',NOW())
+         ON CONFLICT (member_id) DO UPDATE
+         SET coach_userid=EXCLUDED.coach_userid,status='active',updated_at=NOW()
+         WHERE member_wecom_bindings.external_userid IS NULL`,
+        [memberId, coachUserId],
+      );
+      await client.query(
+        `UPDATE wecom_binding_links
+         SET status='superseded',updated_at=NOW()
+         WHERE member_id=$1 AND coach_userid=$2 AND status='pending'`,
+        [memberId, coachUserId],
+      );
+      await client.query(
+        `INSERT INTO wecom_binding_links
+           (state_token,member_id,coach_userid,config_id,qr_code,status,expires_at)
+         VALUES ($1,$2,$3,$4,$5,'pending',$6)`,
+        [stateToken, memberId, coachUserId, configId, qrCode, expiresAt],
+      );
+      await auditOperation(coachUserId, "wecom_member_binding_qr_created", {
+        member_id: memberId,
+        config_id: configId,
+        expires_at: expiresAt,
+      }, client);
+      if (client !== pool) await client.query("COMMIT");
+    } catch (error) {
+      if (client !== pool) await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      if (client !== pool) client.release();
+    }
+
+    return {
+      member_id: memberId,
+      coach_userid: coachUserId,
+      qr_code: qrCode,
+      status: "pending",
+      expires_at: expiresAt,
+      instruction: "请让该会员使用普通微信扫描此专属二维码并添加教练，添加成功后网站会自动同步绑定。",
+    };
+  }
+
+  async function handleContactEvent(message) {
+    if (String(message?.msgType || "").toLowerCase() !== "event"
+      || String(message?.event || "").toLowerCase() !== "change_external_contact"
+      || String(message?.changeType || "").toLowerCase() !== "add_external_contact") {
+      return { ignored: true, reason: "unsupported_event" };
+    }
+    const coachUserId = requireCoachUserId(message.userId);
+    const externalUserId = normalizeId(message.externalUserId, "external_userid", 128);
+    const stateToken = String(message.state || "").trim();
+    if (!/^sb_[A-Za-z0-9_-]{20}$/.test(stateToken)) {
+      return { ignored: true, reason: "not_a_member_binding_qr" };
+    }
+
+    const linkResult = await pool.query(
+      `SELECT state_token,member_id,coach_userid,status,external_userid,expires_at
+       FROM wecom_binding_links
+       WHERE state_token=$1 AND coach_userid=$2
+       LIMIT 1`,
+      [stateToken, coachUserId],
+    );
+    const link = linkResult.rows[0];
+    if (!link) return { ignored: true, reason: "binding_link_not_found" };
+    if (link.status === "consumed" && link.external_userid === externalUserId) {
+      return { bound: true, idempotent_replay: true, member_id: link.member_id };
+    }
+    if (link.status !== "pending" || new Date(link.expires_at).getTime() <= Date.now()) {
+      return { ignored: true, reason: "binding_link_inactive" };
+    }
+
+    const customer = await callWecom(
+      `/cgi-bin/externalcontact/get?external_userid=${encodeURIComponent(externalUserId)}`,
+      { method: "GET" },
+    );
+    const followUsers = Array.isArray(customer.follow_user) ? customer.follow_user : [];
+    if (!followUsers.some((item) => String(item.userid || "") === coachUserId)) {
+      throw publicError(403, "新增客户事件未通过企业微信客户归属复核");
+    }
+
+    const client = typeof pool.connect === "function" ? await pool.connect() : pool;
+    try {
+      if (client !== pool) await client.query("BEGIN");
+      const lockedResult = await client.query(
+        `SELECT member_id,coach_userid,status,external_userid,expires_at
+         FROM wecom_binding_links
+         WHERE state_token=$1
+         FOR UPDATE`,
+        [stateToken],
+      );
+      const locked = lockedResult.rows[0];
+      if (!locked || locked.coach_userid !== coachUserId) {
+        throw publicError(404, "会员绑定二维码不存在");
+      }
+      if (locked.status === "consumed" && locked.external_userid === externalUserId) {
+        if (client !== pool) await client.query("COMMIT");
+        return { bound: true, idempotent_replay: true, member_id: locked.member_id };
+      }
+      if (locked.status !== "pending" || new Date(locked.expires_at).getTime() <= Date.now()) {
+        throw publicError(409, "会员绑定二维码已失效");
+      }
+      const existingResult = await client.query(
+        "SELECT member_id FROM member_wecom_bindings WHERE external_userid=$1 FOR UPDATE",
+        [externalUserId],
+      );
+      const existingMemberId = existingResult.rows[0]?.member_id;
+      if (existingMemberId && existingMemberId !== locked.member_id) {
+        throw publicError(409, "该企业微信客户已绑定其他 member_id");
+      }
+      await client.query(
+        `INSERT INTO member_wecom_bindings
+           (member_id,external_userid,coach_userid,status,updated_at)
+         VALUES ($1,$2,$3,'active',NOW())
+         ON CONFLICT (member_id) DO UPDATE
+         SET external_userid=EXCLUDED.external_userid,
+             coach_userid=EXCLUDED.coach_userid,
+             status='active',
+             updated_at=NOW()`,
+        [locked.member_id, externalUserId, coachUserId],
+      );
+      await client.query(
+        `UPDATE wecom_binding_links
+         SET status='consumed',external_userid=$2,consumed_at=NOW(),updated_at=NOW()
+         WHERE state_token=$1`,
+        [stateToken, externalUserId],
+      );
+      await auditOperation(coachUserId, "wecom_member_binding_auto_completed", {
+        member_id: locked.member_id,
+        external_userid: externalUserId,
+      }, client);
+      if (client !== pool) await client.query("COMMIT");
+      return {
+        bound: true,
+        member_id: locked.member_id,
+        external_userid: externalUserId,
+        coach_userid: coachUserId,
+        verified_via_wecom: true,
+      };
+    } catch (error) {
+      if (client !== pool) await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      if (client !== pool) client.release();
+    }
+  }
+
   async function bindMemberExternalUserId(rawMemberId, rawExternalUserId, coachUserId) {
     requireContactConfigured();
     const memberId = normalizeId(rawMemberId, "member_id");
@@ -641,8 +833,8 @@ export function createWecomContactService({ pool }) {
     return accessToken;
   }
 
-  async function auditOperation(coachUserId, action, detail) {
-    await pool.query(
+  async function auditOperation(coachUserId, action, detail, database = pool) {
+    await database.query(
       "INSERT INTO audit_log (id,actor_id,action,detail) VALUES ($1,$2,$3,$4)",
       [randomUUID(), `wecom:${coachUserId}`, action, detail],
     );
@@ -651,6 +843,7 @@ export function createWecomContactService({ pool }) {
   return {
     contactConfigured,
     toolsConfigured,
+    handleContactEvent,
     handleInternalTool,
   };
 }

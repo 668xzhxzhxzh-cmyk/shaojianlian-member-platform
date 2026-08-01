@@ -76,7 +76,7 @@ const seedState = {
   ],
 };
 
-const hermesPrompt = `你是邵教练专属会员平台唯一的 Hermes 执行型管理智能体。你具备 shao-coach MCP 工具，可查询精确会员档案、列出教练名下 member_id、增改删私教课程、更新训练方案、更新饮食方案、新增身体反馈、更新会员计划并核验变更历史。不要回答“没有这个工具”；应先检查可用 MCP 工具并选择最窄的一个执行。所有查询与修改必须使用精确 member_id，禁止按姓名或昵称猜测。删除课程前必须先查询并向教练确认精确 session_id；新增课程缺少日期、时间或训练重点时应先追问，使用稳定 request_id 避免重试造成重复课程。执行修改后再次查询或读取变更历史，并明确列出真实改变的字段；页面会自动同步，无需提示用户点击同步按钮。管理端的 AI 建议管理只是审核队列，不是你的对话入口。客户消息仍必须先创建草稿并由教练确认；不要声称已经发送或会员已收到。不做医疗诊断；持续疼痛、夜间痛、眩晕或胸闷应建议暂停训练并咨询合格医务人员。`;
+const hermesPrompt = `你是邵教练专属会员平台唯一的 Hermes 执行型管理智能体。你具备 shao-coach MCP 工具，可查询精确会员档案、列出教练名下 member_id、为精确 member_id 生成企业微信自动绑定二维码、增改删私教课程、更新训练方案、更新饮食方案、新增身体反馈、更新会员计划并核验变更历史。不要回答“没有这个工具”；应先检查可用 MCP 工具并选择最窄的一个执行。所有查询与修改必须使用精确 member_id，禁止按姓名或昵称猜测。会员扫描专属二维码添加教练后，企业微信官方回调会自动同步 external_userid，不需要人工绑定。删除课程前必须先查询并向教练确认精确 session_id；新增课程缺少日期、时间或训练重点时应先追问，使用稳定 request_id 避免重试造成重复课程。执行修改后再次查询或读取变更历史，并明确列出真实改变的字段；页面会自动同步，无需提示用户点击同步按钮。管理端的 AI 建议管理只是审核队列，不是你的对话入口。客户消息仍必须先创建草稿并由教练确认；不要声称已经发送或会员已收到。不做医疗诊断；持续疼痛、夜间痛、眩晕或胸闷应建议暂停训练并咨询合格医务人员。`;
 
 await initializeDatabase();
 const wecomContact = createWecomContactService({ pool });
@@ -84,6 +84,9 @@ const wecomApp = createWecomAppService();
 const wecomCallback = createWecomCallbackService({
   onMessage: async (message) => {
     await handleWecomCoachMessage(message);
+  },
+  onContactEvent: async (message) => {
+    await wecomContact.handleContactEvent(message);
   },
 });
 
@@ -196,6 +199,19 @@ async function initializeDatabase() {
       confirmed_at TIMESTAMPTZ,
       provider_updated_at TIMESTAMPTZ
     );
+    CREATE TABLE IF NOT EXISTS wecom_binding_links (
+      state_token TEXT PRIMARY KEY,
+      member_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      coach_userid TEXT NOT NULL,
+      config_id TEXT NOT NULL,
+      qr_code TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      external_userid TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ
+    );
     CREATE TABLE IF NOT EXISTS wecom_callback_messages (
       dedupe_key TEXT PRIMARY KEY,
       msg_id TEXT,
@@ -210,6 +226,7 @@ async function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS notifications_status_date_idx ON notifications(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS member_wecom_bindings_coach_idx ON member_wecom_bindings(coach_userid, status);
     CREATE INDEX IF NOT EXISTS wecom_send_tasks_coach_status_idx ON wecom_send_tasks(coach_userid, status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS wecom_binding_links_member_status_idx ON wecom_binding_links(member_id, coach_userid, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_callback_messages_coach_date_idx ON wecom_callback_messages(coach_userid, created_at DESC);
   `);
   const accounts = [
@@ -224,7 +241,26 @@ async function initializeDatabase() {
       [id, phone, name, role, hash],
     );
   }
+  const defaultCoachUserId = soleAllowedCoachUserId();
+  if (defaultCoachUserId) {
+    await pool.query(
+      `INSERT INTO member_wecom_bindings (member_id,external_userid,coach_userid,status,updated_at)
+       SELECT id,NULL,$1,'active',NOW()
+       FROM users
+       WHERE role='member'
+       ON CONFLICT (member_id) DO NOTHING`,
+      [defaultCoachUserId],
+    );
+  }
   await pool.query("INSERT INTO portal_state (user_id, state_json) VALUES ('member-li',$1) ON CONFLICT (user_id) DO NOTHING", [seedState]);
+}
+
+function soleAllowedCoachUserId() {
+  const coachUserIds = String(process.env.WECOM_ALLOWED_COACH_USERIDS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return coachUserIds.length === 1 ? coachUserIds[0] : "";
 }
 
 async function login(request, response) {
@@ -278,6 +314,15 @@ async function register(request, response) {
       [id, phone, name, passwordHash],
     );
     await client.query("INSERT INTO portal_state (user_id,state_json) VALUES ($1,$2)", [id, memberState]);
+    const defaultCoachUserId = soleAllowedCoachUserId();
+    if (defaultCoachUserId) {
+      await client.query(
+        `INSERT INTO member_wecom_bindings
+           (member_id,external_userid,coach_userid,status,updated_at)
+         VALUES ($1,NULL,$2,'active',NOW())`,
+        [id, defaultCoachUserId],
+      );
+    }
     await client.query(
       "INSERT INTO audit_log (id,actor_id,action,detail) VALUES ($1,$2,'self_register',$3)",
       [randomUUID(), id, { channel: "website", role: "member" }],
@@ -391,6 +436,15 @@ async function createUser(request, response, session) {
     if (role === "member") {
       const memberState = createMemberState({ id, name, phone });
       await pool.query("INSERT INTO portal_state (user_id,state_json) VALUES ($1,$2)", [id, memberState]);
+      const defaultCoachUserId = soleAllowedCoachUserId();
+      if (defaultCoachUserId) {
+        await pool.query(
+          `INSERT INTO member_wecom_bindings
+             (member_id,external_userid,coach_userid,status,updated_at)
+           VALUES ($1,NULL,$2,'active',NOW())`,
+          [id, defaultCoachUserId],
+        );
+      }
     }
     await audit(session.id, "user_create", { id, role });
     return json(response, 201, { user: { id, name, role }, temporaryPassword });

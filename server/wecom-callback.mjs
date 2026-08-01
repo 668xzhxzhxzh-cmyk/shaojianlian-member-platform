@@ -2,7 +2,7 @@ import { createDecipheriv, createHash, timingSafeEqual } from "node:crypto";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
-export function createWecomCallbackService({ onMessage } = {}) {
+export function createWecomCallbackService({ onMessage, onContactEvent } = {}) {
   const token = String(process.env.WECOM_CALLBACK_TOKEN || "").trim();
   const encodingAesKey = String(process.env.WECOM_CALLBACK_AES_KEY || "").trim();
   const expectedReceiverId = String(process.env.WECOM_CORP_ID || "").trim();
@@ -41,7 +41,18 @@ export function createWecomCallbackService({ onMessage } = {}) {
       verifyReceiverId(payload.receiverId, expectedReceiverId);
       const message = parseMessageXml(payload.message);
 
-      if (typeof onMessage === "function" && allowedCoachUserIds.has(message.fromUserName)) {
+      const isContactEvent = message.msgType === "event"
+        && message.event === "change_external_contact";
+      if (isContactEvent
+        && typeof onContactEvent === "function"
+        && allowedCoachUserIds.has(message.userId)) {
+        Promise.resolve(onContactEvent({ ...message, receiverId: payload.receiverId }))
+          .catch((error) => console.error(JSON.stringify({
+            level: "error",
+            integration: "wecom_contact_callback",
+            message: error instanceof Error ? error.message : String(error),
+          })));
+      } else if (typeof onMessage === "function" && allowedCoachUserIds.has(message.fromUserName)) {
         Promise.resolve(onMessage({ ...message, receiverId: payload.receiverId }))
           .catch((error) => console.error(JSON.stringify({
             level: "error",
@@ -165,6 +176,11 @@ function parseMessageXml(xml) {
     msgType: extractXmlText(xml, "MsgType").toLowerCase(),
     content: extractXmlText(xml, "Content").slice(0, 4000),
     event: extractXmlText(xml, "Event").toLowerCase(),
+    changeType: extractXmlText(xml, "ChangeType").toLowerCase(),
+    userId: extractXmlText(xml, "UserID"),
+    externalUserId: extractXmlText(xml, "ExternalUserID"),
+    state: extractXmlText(xml, "State"),
+    welcomeCode: extractXmlText(xml, "WelcomeCode"),
     agentId: extractXmlText(xml, "AgentID"),
     msgId: extractXmlText(xml, "MsgId"),
   };
