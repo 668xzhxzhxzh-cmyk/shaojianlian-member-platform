@@ -207,21 +207,28 @@ export function createWecomContactService({ pool }) {
     if (!/^\d{1,2}\/\d{1,2}$/.test(rawDate) || !/^\d{2}:\d{2}[–-]\d{2}:\d{2}$/.test(time)) {
       throw publicError(400, "课程日期或时间格式无效");
     }
+    const date = rawDate.split("/").map((part) => Number(part)).join("/");
+    const normalizedTime = time.replace("-", "–");
     const requestId = String(body.request_id || "").trim().replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
     const bookingId = requestId ? `hermes-booking-${requestId}` : `hermes-booking-${randomUUID()}`;
-    const existing = (Array.isArray(state.bookings) ? state.bookings : []).find((item) => item.id === bookingId);
+    const bookings = Array.isArray(state.bookings) ? state.bookings : [];
+    const existing = bookings.find((item) => item.id === bookingId || (
+      item.date === date
+      && String(item.time || "").replace("-", "–") === normalizedTime
+      && item.focus === focus
+    ));
     if (existing) return { changed: false, member_id: memberId, booking: existing, idempotent_replay: true, sync: "课程已存在，未重复创建" };
     const booking = {
       id: bookingId,
       day,
-      date: rawDate,
-      time,
+      date,
+      time: normalizedTime,
       title: "一对一私教",
       coach: "邵教练",
       focus,
       status: ["已预约", "待确认", "已完成"].includes(String(body.status)) ? String(body.status) : "已预约",
     };
-    state.bookings = [...(Array.isArray(state.bookings) ? state.bookings : []), booking];
+    state.bookings = [...bookings, booking];
     await saveMemberState(memberId, state, coachUserId, "hermes_private_session_added", { booking });
     return { changed: true, member_id: memberId, booking, sync: "网站页面已自动同步" };
   }

@@ -157,6 +157,16 @@ test("Hermes can add and delete a private session for an exact bound member", as
   assert.equal(replayed.result.idempotent_replay, true);
   assert.equal(pool.state.bookings.length, 1);
 
+  const replayedWithoutRequestId = await runHermesOperation(service, {
+    operation: "add_private_session",
+    day: "周五",
+    date: "07/31",
+    time: "18:00-19:00",
+    focus: "下肢力量",
+  });
+  assert.equal(replayedWithoutRequestId.result.idempotent_replay, true);
+  assert.equal(pool.state.bookings.length, 1);
+
   const updated = await runHermesOperation(service, {
     operation: "update_private_session",
     session_id: pool.state.bookings[0].id,
