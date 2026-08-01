@@ -97,6 +97,7 @@ export function AssistantView({
     setBusy(true);
     const controller = new AbortController();
     abortRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 125_000);
     setMessages((items) => [...items, { role: "assistant", content: "", time: now() }]);
     try {
       const response = await fetch("/api/agent/chat", {
@@ -125,11 +126,16 @@ export function AssistantView({
       await refresh(selectedProfile.id);
       notify("AI 操作已完成，会员页面已自动同步");
     } catch (error) {
-      if ((error as Error).name !== "AbortError") {
-        setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: "AI 当前处于演示模式。连接生产环境后即可获得实时个性化回答；其他业务功能不受影响。" } : item));
-        notify("AI 服务暂未连接，已切换演示回复", "warning");
-      }
+      const timedOut = (error as Error).name === "AbortError";
+      setMessages((items) => items.map((item, index) => index === items.length - 1 ? {
+        ...item,
+        content: timedOut
+          ? "Hermes 本次处理超时，任务未确认完成。请检查指令信息是否完整后重试。"
+          : "Hermes 暂时未能完成本次任务，请稍后重试；其他业务功能不受影响。",
+      } : item));
+      notify(timedOut ? "Hermes 处理超时，未确认任务完成" : "Hermes 服务暂时不可用", "warning");
     } finally {
+      window.clearTimeout(timeout);
       setBusy(false);
       abortRef.current = null;
     }

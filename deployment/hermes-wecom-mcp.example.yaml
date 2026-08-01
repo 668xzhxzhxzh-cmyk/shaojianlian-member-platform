@@ -1,5 +1,9 @@
 # 合并到 /var/lib/hermes/.hermes/config.yaml。
 # 真实令牌只放 /var/lib/hermes/.hermes/.env，不要写入本文件。
+model:
+  # DeepSeek V4 Flash 官方上下文为 1M；Hermes 至少要求 64K。
+  context_length: 1000000
+
 mcp_servers:
   shao-coach:
     command: /var/lib/hermes/.hermes/hermes-agent/venv/bin/python
@@ -23,6 +27,7 @@ mcp_servers:
         - update_member_profile
         - get_member_change_history
         - list_customer_ids
+        - create_member_binding_qr
         - bind_member_external_userid
         - create_member_message_draft
         - confirm_customer_send_task

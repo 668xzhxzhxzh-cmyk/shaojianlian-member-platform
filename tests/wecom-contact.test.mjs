@@ -304,13 +304,15 @@ test("member-specific contact QR automatically binds the official add-customer c
     }
     if (url.pathname === "/cgi-bin/externalcontact/get") {
       assert.equal(url.searchParams.get("external_userid"), "wm-customer-1");
-      return { ok: true, status: 200, async json() { return { errcode: 0, follow_user: [{ userid: "coach-user-1" }] }; } };
+      return { ok: true, status: 200, async json() { return { errcode: 0, external_contact: { name: "🐻🐻君" }, follow_user: [{ userid: "coach-user-1" }] }; } };
     }
     throw new Error(`unexpected fetch: ${url}`);
   };
 
   const links = new Map();
   let binding = { member_id: "member-1", coach_userid: "coach-user-1", external_userid: null };
+  let syncedUserName = "测试会员";
+  let portalState = { profile: { name: "测试会员" }, suggestions: [{ member: "测试会员" }] };
   const audits = [];
   const database = {
     async query(sql, params = []) {
@@ -354,6 +356,17 @@ test("member-specific contact QR automatically binds the official add-customer c
         Object.assign(links.get(params[0]), { status: "consumed", external_userid: params[1] });
         return { rows: [] };
       }
+      if (text.includes("UPDATE users SET name=$2")) {
+        syncedUserName = params[1];
+        return { rows: [] };
+      }
+      if (text.includes("SELECT state_json FROM portal_state")) {
+        return { rows: [{ state_json: structuredClone(portalState) }] };
+      }
+      if (text.includes("UPDATE portal_state SET state_json=$2")) {
+        portalState = structuredClone(params[1]);
+        return { rows: [] };
+      }
       if (text.includes("INSERT INTO audit_log")) {
         audits.push({ action: params[2], detail: params[3] });
         return { rows: [] };
@@ -383,8 +396,12 @@ test("member-specific contact QR automatically binds the official add-customer c
     });
     assert.equal(completed.bound, true);
     assert.equal(completed.member_id, "member-1");
+    assert.equal(completed.member_name, "🐻🐻君");
     assert.equal(binding.external_userid, "wm-customer-1");
     assert.equal(links.get(issuedState).status, "consumed");
+    assert.equal(syncedUserName, "🐻🐻君");
+    assert.equal(portalState.profile.name, "🐻🐻君");
+    assert.equal(portalState.suggestions[0].member, "🐻🐻君");
 
     const replay = await service.handleContactEvent({
       msgType: "event",

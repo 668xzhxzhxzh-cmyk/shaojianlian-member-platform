@@ -15,7 +15,7 @@ test("builds the member portal without starter artifacts", async () => {
 });
 
 test("includes coach approval, native agent and WeCom self-built app tooling", async () => {
-  const [coach, admin, assistant, envExample, tools, contact, callback, app] = await Promise.all([
+  const [coach, admin, assistant, envExample, tools, contact, callback, app, hermesConfig, server] = await Promise.all([
     readFile(new URL("../components/coach-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/management-views.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/assistant-view.tsx", import.meta.url), "utf8"),
@@ -24,6 +24,8 @@ test("includes coach approval, native agent and WeCom self-built app tooling", a
     readFile(new URL("../server/wecom-contact.mjs", import.meta.url), "utf8"),
     readFile(new URL("../server/wecom-callback.mjs", import.meta.url), "utf8"),
     readFile(new URL("../server/wecom-app.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../deployment/hermes-wecom-mcp.example.yaml", import.meta.url), "utf8"),
+    readFile(new URL("../server/index.mjs", import.meta.url), "utf8"),
   ]);
   assert.match(coach, /会员档案/);
   assert.match(coach, /训练方案设计/);
@@ -36,6 +38,10 @@ test("includes coach approval, native agent and WeCom self-built app tooling", a
   assert.match(callback, /verifySignature/);
   assert.match(callback, /decryptPayload/);
   assert.match(app, /cgi-bin\/message\/send/);
+  assert.match(hermesConfig, /context_length: 1000000/);
+  assert.match(hermesConfig, /create_member_binding_qr/);
+  assert.match(server, /THEN users\.name ELSE EXCLUDED\.name/);
+  assert.match(assistant, /Hermes 本次处理超时/);
   assert.doesNotMatch(`${assistant}${contact}`, /notifications\/weixin|WECOM_WEBHOOK_URL/);
 });
 

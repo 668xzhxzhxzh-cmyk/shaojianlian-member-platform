@@ -545,9 +545,11 @@ export function createWecomContactService({ pool }) {
          WHERE state_token=$1`,
         [stateToken, externalUserId],
       );
+      const syncedName = await syncOfficialCustomerName(client, locked.member_id, customer);
       await auditOperation(coachUserId, "wecom_member_binding_auto_completed", {
         member_id: locked.member_id,
         external_userid: externalUserId,
+        official_name_synced: Boolean(syncedName),
       }, client);
       if (client !== pool) await client.query("COMMIT");
       return {
@@ -556,6 +558,7 @@ export function createWecomContactService({ pool }) {
         external_userid: externalUserId,
         coach_userid: coachUserId,
         verified_via_wecom: true,
+        member_name: syncedName,
       };
     } catch (error) {
       if (client !== pool) await client.query("ROLLBACK");
@@ -601,16 +604,46 @@ export function createWecomContactService({ pool }) {
        WHERE member_id=$1 AND coach_userid=$2 AND status='pending'`,
       [memberId, coachUserId],
     );
+    const syncedName = await syncOfficialCustomerName(pool, memberId, customer);
     await auditOperation(coachUserId, "wecom_member_binding_verified", {
       member_id: memberId,
       external_userid: externalUserId,
+      official_name_synced: Boolean(syncedName),
     });
     return {
       member_id: memberId,
       external_userid: externalUserId,
       coach_userid: coachUserId,
       verified_via_wecom: true,
+      member_name: syncedName,
     };
+  }
+
+  async function syncOfficialCustomerName(database, memberId, customer) {
+    const officialName = String(customer?.external_contact?.name || "").trim();
+    const characterCount = Array.from(officialName).length;
+    if (!officialName || characterCount > 64) return null;
+
+    await database.query(
+      "UPDATE users SET name=$2 WHERE id=$1 AND role='member'",
+      [memberId, officialName],
+    );
+    const stateResult = await database.query(
+      "SELECT state_json FROM portal_state WHERE user_id=$1 FOR UPDATE",
+      [memberId],
+    );
+    if (stateResult.rows[0]?.state_json) {
+      const state = structuredClone(stateResult.rows[0].state_json);
+      state.profile = { ...(state.profile || {}), name: officialName };
+      if (Array.isArray(state.suggestions)) {
+        state.suggestions = state.suggestions.map((item) => ({ ...item, member: officialName }));
+      }
+      await database.query(
+        "UPDATE portal_state SET state_json=$2,updated_at=NOW() WHERE user_id=$1",
+        [memberId, state],
+      );
+    }
+    return officialName;
   }
 
   async function createMessageDraft({ memberId: rawMemberId, coachUserId, title, content }) {

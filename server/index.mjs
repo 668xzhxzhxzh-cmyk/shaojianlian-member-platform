@@ -237,7 +237,13 @@ async function initializeDatabase() {
   for (const [id, phone, name, role, password] of accounts) {
     const hash = await bcrypt.hash(password, 12);
     await pool.query(
-      "INSERT INTO users (id, phone, name, role, password_hash) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET phone=EXCLUDED.phone,name=EXCLUDED.name,role=EXCLUDED.role,password_hash=EXCLUDED.password_hash",
+      `INSERT INTO users (id, phone, name, role, password_hash)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (id) DO UPDATE
+       SET phone=EXCLUDED.phone,
+           name=CASE WHEN EXCLUDED.role='member' THEN users.name ELSE EXCLUDED.name END,
+           role=EXCLUDED.role,
+           password_hash=EXCLUDED.password_hash`,
       [id, phone, name, role, hash],
     );
   }
