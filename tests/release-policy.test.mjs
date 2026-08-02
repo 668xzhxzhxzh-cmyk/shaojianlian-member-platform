@@ -86,12 +86,31 @@ test("production WeChat status inspection is read-only and sanitized", async () 
   assert.match(inspector, /wecom_customer_service_callback/);
   assert.match(inspector, /\/var\/log\/nginx\/access\.log/);
   assert.match(inspector, /journalctl/);
+  assert.match(inspector, /apiUpstreamPort/);
   assert.doesNotMatch(inspector, /SELECT[^;]*(?:external_userid|member_id|turns_json|payload_json)/i);
   assert.doesNotMatch(inspector, /callbackAccess[^]*msg_signature/i);
   assert.doesNotMatch(
     inspector,
     /\b(?:INSERT\s+INTO|UPDATE\s+\w|DELETE\s+FROM|TRUNCATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b/i,
   );
+});
+
+test("production routes the only WeCom callback through the website API", async () => {
+  const [deploy, route, packageScript, archiveVerification] = await Promise.all([
+    read(".github/workflows/deploy.yml"),
+    read("scripts/configure-wecom-callback-route.sh"),
+    read("scripts/package-production.sh"),
+    read("scripts/verify-release-archive.sh"),
+  ]);
+  assert.match(deploy, /configure-wecom-callback-route\.sh/);
+  assert.match(deploy, /Route WeChat customer-service callbacks to the website API/);
+  assert.match(route, /BEGIN SHAO HERMES WECOM CALLBACK/);
+  assert.match(route, /127\.0\.0\.1:8788/);
+  assert.match(route, /restore_route/);
+  assert.match(route, /nginx -t/);
+  assert.match(route, /callback_status/);
+  assert.match(packageScript, /configure-wecom-callback-route\.sh/);
+  assert.match(archiveVerification, /configure-wecom-callback-route\.sh/);
 });
 
 test("project Skill and AGENTS rules require verification before completion", async () => {

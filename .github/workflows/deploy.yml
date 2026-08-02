@@ -76,6 +76,7 @@ jobs:
         run: |
           scp scripts/release-deploy.sh "$ECS_USER@$ECS_HOST:/tmp/shao-release-deploy.sh"
           scp scripts/configure-production-runtime.sh "$ECS_USER@$ECS_HOST:/tmp/shao-configure-runtime.sh"
+          scp scripts/configure-wecom-callback-route.sh "$ECS_USER@$ECS_HOST:/tmp/shao-configure-callback-route.sh"
 
       - name: Let Aliyun download, verify and deploy GitHub artifact
         env:
@@ -107,12 +108,20 @@ jobs:
             printf 'WECOM_KF_ACCOUNT_NAME=%s\n' 'AI健康管理服务'
           } | ssh "$ECS_USER@$ECS_HOST" "bash /tmp/shao-configure-runtime.sh /opt/shao-coach"
 
+      - name: Route WeChat customer-service callbacks to the website API
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          ssh "$ECS_USER@$ECS_HOST" \
+            "bash /tmp/shao-configure-callback-route.sh /etc/nginx/sites-enabled/shao-coach"
+
       - name: Remove temporary controller
         if: always()
         env:
           ECS_HOST: ${{ secrets.ECS_HOST }}
           ECS_USER: ${{ secrets.ECS_USER }}
-        run: ssh "$ECS_USER@$ECS_HOST" "rm -f /tmp/shao-release-deploy.sh /tmp/shao-configure-runtime.sh"
+        run: ssh "$ECS_USER@$ECS_HOST" "rm -f /tmp/shao-release-deploy.sh /tmp/shao-configure-runtime.sh /tmp/shao-configure-callback-route.sh"
 
   verify-wecom:
     if: ${{ inputs.confirm_production == 'VERIFY_WECOM' }}

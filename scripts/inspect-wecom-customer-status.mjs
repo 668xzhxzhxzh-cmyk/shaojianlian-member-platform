@@ -34,6 +34,14 @@ async function inspectCallbackAccess() {
     .slice(-20);
 }
 
+async function inspectCallbackRoute() {
+  const text = await readFile("/etc/nginx/sites-enabled/shao-coach", "utf8").catch(() => "");
+  const exact = /location\s*=\s*\/api\/wecom\/callback\b/.test(text);
+  const api = text.match(/location\s+\/api\/\s*\{([^]*?)\n\s*\}/);
+  const upstream = String(api?.[1] || "").match(/proxy_pass\s+http:\/\/127\.0\.0\.1:(\d+)/);
+  return { exactLocation: exact, apiUpstreamPort: upstream ? Number(upstream[1]) : null };
+}
+
 async function inspectCallbackErrors() {
   const { stdout = "" } = await execFileAsync("journalctl", [
     "--unit=shao-api.service",
@@ -71,7 +79,7 @@ function categorizeError(message) {
 }
 
 try {
-  const [messages, conversations, callbackAccess, callbackErrors] = await Promise.all([
+  const [messages, conversations, callbackAccess, callbackErrors, callbackRoute] = await Promise.all([
     pool.query(
       `SELECT msg_id,msg_type,status,result,attempt_count,created_at,updated_at
        FROM wecom_customer_messages
@@ -80,6 +88,7 @@ try {
     pool.query("SELECT COUNT(*)::int AS count,MAX(updated_at) AS latest_at FROM wecom_customer_conversations"),
     inspectCallbackAccess(),
     inspectCallbackErrors(),
+    inspectCallbackRoute(),
   ]);
   console.log(JSON.stringify({
     ok: true,
@@ -95,6 +104,7 @@ try {
     conversations: conversations.rows[0] || { count: 0, latest_at: null },
     callbackAccess,
     callbackErrors,
+    callbackRoute,
   }));
 } finally {
   await pool.end();

@@ -40,12 +40,14 @@ NGINX_SITE = Path("/etc/nginx/sites-enabled/shao-coach")
 BACKUP_ROOT = Path("/var/backups/shao-coach/wecom-native")
 CALLBACK_PORT = 8645
 CALLBACK_PATH = "/wecom/callback"
+SITE_CALLBACK_PORT = 8788
+SITE_CALLBACK_PATH = "/api/wecom/callback"
 
 NGINX_BEGIN = "    # BEGIN SHAO HERMES WECOM CALLBACK"
 NGINX_END = "    # END SHAO HERMES WECOM CALLBACK"
 NGINX_BLOCK = f"""{NGINX_BEGIN}
     location = /api/wecom/callback {{
-        proxy_pass http://127.0.0.1:{CALLBACK_PORT}{CALLBACK_PATH};
+        proxy_pass http://127.0.0.1:{SITE_CALLBACK_PORT}{SITE_CALLBACK_PATH};
         proxy_http_version 1.1;
         proxy_buffering off;
         proxy_read_timeout 30s;
