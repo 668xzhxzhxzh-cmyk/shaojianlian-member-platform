@@ -83,7 +83,11 @@ test("production WeChat status inspection is read-only and sanitized", async () 
   assert.match(deploy, /VERIFY_WECOM/);
   assert.match(deploy, /verify-wecom:/);
   assert.match(inspector, /SELECT msg_id,msg_type,status,result,attempt_count,created_at,updated_at/);
+  assert.match(inspector, /wecom_customer_service_callback/);
+  assert.match(inspector, /\/var\/log\/nginx\/access\.log/);
+  assert.match(inspector, /journalctl/);
   assert.doesNotMatch(inspector, /SELECT[^;]*(?:external_userid|member_id|turns_json|payload_json)/i);
+  assert.doesNotMatch(inspector, /callbackAccess[^]*msg_signature/i);
   assert.doesNotMatch(
     inspector,
     /\b(?:INSERT\s+INTO|UPDATE\s+\w|DELETE\s+FROM|TRUNCATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b/i,

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { promisify } from "node:util";
 
 const [envFile, releaseDir] = process.argv.slice(2);
 if (!envFile || !releaseDir) throw new Error("status inspection paths are required");
@@ -17,15 +19,67 @@ if (!databaseUrl) throw new Error("DATABASE_URL is not configured");
 const requireFromRelease = createRequire(`${releaseDir}/package.json`);
 const { Pool } = requireFromRelease("pg");
 const pool = new Pool({ connectionString: databaseUrl, max: 1 });
+const execFileAsync = promisify(execFile);
+
+async function inspectCallbackAccess() {
+  const text = await readFile("/var/log/nginx/access.log", "utf8").catch(() => "");
+  return text
+    .split(/\r?\n/)
+    .slice(-5000)
+    .map((line) => {
+      const match = line.match(/\[([^\]]+)\]\s+"POST\s+\/api\/wecom\/callback(?:\?[^\s]*)?\s+HTTP\/[^"]+"\s+(\d{3})\b/);
+      return match ? { at: match[1], status: Number(match[2]) } : null;
+    })
+    .filter(Boolean)
+    .slice(-20);
+}
+
+async function inspectCallbackErrors() {
+  const { stdout = "" } = await execFileAsync("journalctl", [
+    "--unit=shao-api.service",
+    "--since=12 hours ago",
+    "--no-pager",
+    "--output=cat",
+  ], { maxBuffer: 2 * 1024 * 1024 }).catch(() => ({ stdout: "" }));
+  return stdout
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      try {
+        const entry = JSON.parse(line);
+        if (entry?.integration !== "wecom_customer_service_callback") return [];
+        return [{
+          level: String(entry.level || "error").slice(0, 20),
+          integration: "wecom_customer_service_callback",
+          errorCategory: categorizeError(entry.message),
+        }];
+      } catch {
+        return [];
+      }
+    })
+    .slice(-20);
+}
+
+function categorizeError(message) {
+  const value = String(message || "");
+  if (/errcode=\d+/i.test(value)) return value.match(/errcode=\d+/i)[0].toLowerCase();
+  if (/access_token/i.test(value)) return "access_token";
+  if (/客服账号|open_kfid/i.test(value)) return "account_mismatch";
+  if (/同步 Token/i.test(value)) return "sync_token";
+  if (/会员|绑定/i.test(value)) return "member_binding";
+  if (/timeout|timed out|abort/i.test(value)) return "timeout";
+  return "internal_error";
+}
 
 try {
-  const [messages, conversations] = await Promise.all([
+  const [messages, conversations, callbackAccess, callbackErrors] = await Promise.all([
     pool.query(
       `SELECT msg_id,msg_type,status,result,attempt_count,created_at,updated_at
        FROM wecom_customer_messages
        ORDER BY created_at DESC LIMIT 20`,
     ),
     pool.query("SELECT COUNT(*)::int AS count,MAX(updated_at) AS latest_at FROM wecom_customer_conversations"),
+    inspectCallbackAccess(),
+    inspectCallbackErrors(),
   ]);
   console.log(JSON.stringify({
     ok: true,
@@ -39,6 +93,8 @@ try {
       updatedAt: row.updated_at,
     })),
     conversations: conversations.rows[0] || { count: 0, latest_at: null },
+    callbackAccess,
+    callbackErrors,
   }));
 } finally {
   await pool.end();
