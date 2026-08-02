@@ -6,6 +6,8 @@ import pg from "pg";
 import { createWecomContactService } from "./wecom-contact.mjs";
 import { createWecomCallbackService } from "./wecom-callback.mjs";
 import { createWecomAppService } from "./wecom-app.mjs";
+import { createWecomCustomerService } from "./wecom-kf.mjs";
+import { createHermesCustomerReplyService, createHermesVisionService } from "./hermes-vision.mjs";
 import { createHermesCommandRouter } from "./hermes-command-router.mjs";
 import { createHermesEvolutionService, scheduleHermesEvolution } from "./hermes-evolution.mjs";
 import { createCourseReminderService } from "./course-reminders.mjs";
@@ -99,6 +101,14 @@ await initializeDatabase();
 const wecomConversation = createWecomConversationStore({ pool });
 const wecomContact = createWecomContactService({ pool });
 const wecomApp = createWecomAppService();
+const hermesVision = createHermesVisionService();
+const hermesCustomerReply = createHermesCustomerReplyService();
+const wecomCustomerService = createWecomCustomerService({
+  pool,
+  visionService: hermesVision,
+  replyService: hermesCustomerReply,
+  audit,
+});
 const courseReminders = createCourseReminderService({
   pool,
   queueRoutineMessage: (message) => wecomContact.createCustomerMessage(message),
@@ -123,6 +133,14 @@ const wecomCallback = createWecomCallbackService({
     await wecomContact.handleContactEvent(message);
   },
 });
+const wecomCustomerCallback = createWecomCallbackService({
+  callbackToken: process.env.WECOM_KF_CALLBACK_TOKEN || "",
+  callbackAesKey: process.env.WECOM_KF_CALLBACK_AES_KEY || "",
+  receiverId: process.env.WECOM_CORP_ID || "",
+  onCustomerServiceEvent: async (message) => {
+    await wecomCustomerService.handleEvent(message);
+  },
+});
 
 const server = createServer(async (request, response) => {
   setSecurityHeaders(response);
@@ -140,6 +158,8 @@ const server = createServer(async (request, response) => {
         wecomContact: wecomContact.contactConfigured,
         wecomCallback: wecomCallback.callbackConfigured,
         wecomApp: wecomApp.appConfigured,
+        wecomCustomerService: wecomCustomerService.configured && wecomCustomerCallback.callbackConfigured,
+        hermesVision: hermesVision.configured,
         hermesMemberTools: wecomContact.toolsConfigured,
       },
     });
@@ -148,6 +168,14 @@ const server = createServer(async (request, response) => {
         const status = Number(error?.statusCode || 500);
         return json(response, status, {
           error: status < 500 ? error.message : "企业微信回调暂时不可用",
+        });
+      });
+    }
+    if (url.pathname === "/api/wecom/kf/callback") {
+      return wecomCustomerCallback.handle(request, response, url).catch((error) => {
+        const status = Number(error?.statusCode || 500);
+        return json(response, status, {
+          error: status < 500 ? error.message : "微信客服回调暂时不可用",
         });
       });
     }
@@ -321,6 +349,17 @@ async function initializeDatabase() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS wecom_customer_messages (
+      msg_id TEXT PRIMARY KEY,
+      external_userid TEXT NOT NULL,
+      open_kfid TEXT NOT NULL,
+      msg_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'processing',
+      result TEXT,
+      error_message TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS wecom_coach_conversations (
       coach_userid TEXT PRIMARY KEY,
       member_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -359,6 +398,7 @@ async function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS wecom_course_reminders_status_start_idx ON wecom_course_reminders(status, course_start);
     CREATE INDEX IF NOT EXISTS wecom_binding_links_member_status_idx ON wecom_binding_links(member_id, coach_userid, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_callback_messages_coach_date_idx ON wecom_callback_messages(coach_userid, created_at DESC);
+    CREATE INDEX IF NOT EXISTS wecom_customer_messages_external_date_idx ON wecom_customer_messages(external_userid, created_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_coach_conversations_updated_idx ON wecom_coach_conversations(updated_at DESC);
     CREATE INDEX IF NOT EXISTS hermes_runtime_incidents_fingerprint_idx ON hermes_runtime_incidents(fingerprint, updated_at DESC);
   `);

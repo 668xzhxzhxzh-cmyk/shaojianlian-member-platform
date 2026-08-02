@@ -115,6 +115,8 @@ test("WeCom callback AES-decrypts POST messages before dispatch", async () => {
     welcomeCode: "",
     agentId: "1000002",
     msgId: "msg-1",
+    kfToken: "",
+    openKfId: "",
     receiverId: corpId,
   });
 });
@@ -187,4 +189,24 @@ test("WeCom callback acknowledges but never dispatches unauthorized users", asyn
   assert.equal(res.status, 200);
   assert.equal(res.body, "success");
   assert.equal(dispatched, false);
+});
+
+test("WeCom callback dispatches an authenticated customer-service event", async () => {
+  configure();
+  let received;
+  const service = createWecomCallbackService({
+    onCustomerServiceEvent: async (message) => { received = message; },
+  });
+  const innerXml = `<xml><ToUserName><![CDATA[${corpId}]]></ToUserName><FromUserName><![CDATA[sys]]></FromUserName><CreateTime>1785590402</CreateTime><MsgType><![CDATA[event]]></MsgType><Event><![CDATA[kf_msg_or_event]]></Event><Token><![CDATA[sync-token-1]]></Token><OpenKfId><![CDATA[wk-test-1]]></OpenKfId></xml>`;
+  const encrypted = encrypt(innerXml);
+  const url = callbackUrl(encrypted);
+  url.searchParams.delete("echostr");
+  const res = response();
+  await service.handle(request("POST", `<xml><Encrypt><![CDATA[${encrypted}]]></Encrypt></xml>`), res, url);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(res.status, 200);
+  assert.equal(received.event, "kf_msg_or_event");
+  assert.equal(received.kfToken, "sync-token-1");
+  assert.equal(received.openKfId, "wk-test-1");
 });

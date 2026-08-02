@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowUp,
@@ -67,7 +67,20 @@ export function AssistantView({
   const [saveState, setSaveState] = useState("");
   const [evolutionReview, setEvolutionReview] = useState<EvolutionReview | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const chatMessagesRef = useRef<HTMLDivElement | null>(null);
+  const followLatestRef = useRef(true);
+  const scrollFrameRef = useRef<number | null>(null);
   const suggestion = state.suggestions[0];
+
+  const scrollChatToLatest = useCallback((behavior: ScrollBehavior = "auto") => {
+    const element = chatMessagesRef.current;
+    if (!element) return;
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      element.scrollTo({ top: element.scrollHeight, behavior });
+      scrollFrameRef.current = null;
+    });
+  }, []);
 
   useEffect(() => {
     portalFetch("/api/users", role)
@@ -96,6 +109,14 @@ export function AssistantView({
       .catch(() => undefined);
   }, [role]);
 
+  useEffect(() => {
+    if (followLatestRef.current) scrollChatToLatest(busy ? "auto" : "smooth");
+  }, [busy, messages, scrollChatToLatest]);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
+  }, []);
+
   const chartData = useMemo(
     () => state.bodyMetrics.slice(-7).map((item, index) => ({ ...item, load: [1820, 1940, 1600, 2250, 1760, 2140, 1680][index] })),
     [state.bodyMetrics],
@@ -105,6 +126,7 @@ export function AssistantView({
     event?.preventDefault();
     const message = input.trim();
     if (!message || busy) return;
+    followLatestRef.current = true;
     const nextMessages = [...messages, { role: "coach" as const, content: message, time: now() }];
     setMessages(nextMessages);
     setInput("");
@@ -185,7 +207,15 @@ export function AssistantView({
         <Card className="chat-panel">
           <div className="chat-heading"><div><MessageCircleMore size={20} /><b>与 Hermes 对话</b></div><button className={`icon-button ${historyOpen ? "active" : ""}`} onClick={() => setHistoryOpen((open) => !open)} aria-label="历史记录"><History size={18} /></button></div>
           {historyOpen ? <div className="chat-history"><b>最近对话</b><button onClick={() => { setHistoryOpen(false); notify("已打开今天 10:32 的恢复分析"); }}>今天 10:32 · 李明恢复分析</button><button onClick={() => { setHistoryOpen(false); notify("已打开 7 月 27 日的饮食复盘"); }}>7 月 27 日 · 饮食执行复盘</button></div> : null}
-          <div className="chat-messages">
+          <div
+            className="chat-messages"
+            ref={chatMessagesRef}
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              followLatestRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= 64;
+            }}
+            aria-live="polite"
+          >
             {messages.map((message, index) => (
               <div className={`chat-message ${message.role}`} key={`${message.time}-${index}`}>
                 <Avatar name={message.role === "coach" ? "邵教练" : "H"} size="sm" />
@@ -198,7 +228,17 @@ export function AssistantView({
             <div>{quickPrompts.map((prompt) => <button key={prompt} onClick={() => choosePrompt(prompt)}>{prompt}</button>)}</div>
           </div>
           <form className="chat-input" onSubmit={askHermes}>
-            <textarea id="hermes-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入你希望 AI 分析的问题或任务…" rows={3} />
+            <textarea
+              id="hermes-input"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onFocus={() => {
+                followLatestRef.current = true;
+                scrollChatToLatest("auto");
+              }}
+              placeholder="输入你希望 AI 分析的问题或任务…"
+              rows={3}
+            />
             <button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="发送给 AI">{busy ? <RefreshCcw className="spin" size={18} /> : <ArrowUp size={18} />}</button>
           </form>
           <small className="ai-disclaimer">AI 建议仅供教练决策参考，不能替代医疗诊断。</small>

@@ -2,10 +2,17 @@ import { createDecipheriv, createHash, timingSafeEqual } from "node:crypto";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
-export function createWecomCallbackService({ onMessage, onContactEvent } = {}) {
-  const token = String(process.env.WECOM_CALLBACK_TOKEN || "").trim();
-  const encodingAesKey = String(process.env.WECOM_CALLBACK_AES_KEY || "").trim();
-  const expectedReceiverId = String(process.env.WECOM_CORP_ID || "").trim();
+export function createWecomCallbackService({
+  onMessage,
+  onContactEvent,
+  onCustomerServiceEvent,
+  callbackToken,
+  callbackAesKey,
+  receiverId,
+} = {}) {
+  const token = String(callbackToken ?? process.env.WECOM_CALLBACK_TOKEN ?? "").trim();
+  const encodingAesKey = String(callbackAesKey ?? process.env.WECOM_CALLBACK_AES_KEY ?? "").trim();
+  const expectedReceiverId = String(receiverId ?? process.env.WECOM_CORP_ID ?? "").trim();
   const allowedCoachUserIds = new Set(
     String(process.env.WECOM_ALLOWED_COACH_USERIDS || "")
       .split(",")
@@ -43,7 +50,16 @@ export function createWecomCallbackService({ onMessage, onContactEvent } = {}) {
 
       const isContactEvent = message.msgType === "event"
         && message.event === "change_external_contact";
-      if (isContactEvent
+      const isCustomerServiceEvent = message.msgType === "event"
+        && message.event === "kf_msg_or_event";
+      if (isCustomerServiceEvent && typeof onCustomerServiceEvent === "function") {
+        Promise.resolve(onCustomerServiceEvent({ ...message, receiverId: payload.receiverId }))
+          .catch((error) => console.error(JSON.stringify({
+            level: "error",
+            integration: "wecom_customer_service_callback",
+            message: error instanceof Error ? error.message : String(error),
+          })));
+      } else if (isContactEvent
         && typeof onContactEvent === "function"
         && allowedCoachUserIds.has(message.userId)) {
         Promise.resolve(onContactEvent({ ...message, receiverId: payload.receiverId }))
@@ -183,6 +199,8 @@ function parseMessageXml(xml) {
     welcomeCode: extractXmlText(xml, "WelcomeCode"),
     agentId: extractXmlText(xml, "AgentID"),
     msgId: extractXmlText(xml, "MsgId"),
+    kfToken: extractXmlText(xml, "Token"),
+    openKfId: extractXmlText(xml, "OpenKfId"),
   };
 }
 

@@ -458,25 +458,26 @@ small { color: var(--muted); }
 .promise-grid b { font: 30px Georgia, serif; color: var(--green); }
 .promise-grid span { color: var(--muted); }
 
-.assistant-page { display: grid; gap: 16px; animation: rise .35s ease both; }
+.assistant-page { display: grid; gap: 16px; min-width: 0; animation: rise .35s ease both; }
 .assistant-intro { padding-bottom: 0; }
 .assistant-scope-note { width: max-content; max-width: 100%; display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 13px; border: 1px solid #d5ddcc; border-radius: 10px; color: var(--green); background: var(--green-soft); }
 .assistant-scope-note > span { display: grid; }
 .assistant-scope-note small { color: var(--muted); font-size: 9px; }
-.assistant-grid { display: grid; grid-template-columns: minmax(390px,1.05fr) minmax(520px,1.25fr) minmax(250px,.62fr); gap: 16px; align-items: start; }
-.chat-panel { display: flex; flex-direction: column; min-height: 820px; position: sticky; top: 90px; }
+.assistant-grid { display: grid; grid-template-columns: minmax(390px,1.05fr) minmax(520px,1.25fr) minmax(250px,.62fr); gap: 16px; align-items: start; min-width: 0; }
+.assistant-grid > *, .chat-panel, .suggestion-column, .evidence-column { min-width: 0; }
+.chat-panel { display: flex; flex-direction: column; min-height: 820px; position: sticky; top: 90px; overflow: hidden; }
 .chat-heading, .chat-heading > div { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
 .chat-heading .icon-button.active { color: var(--green); background: var(--green-soft); }
 .chat-history { display: grid; gap: 5px; margin-top: 12px; padding: 10px; border: 1px solid var(--line); background: #faf9f4; border-radius: 9px; }
 .chat-history > b { font-size: 11px; color: var(--muted); }
 .chat-history > button { text-align: left; border: 0; background: transparent; padding: 7px; border-radius: 6px; }
 .chat-history > button:hover { background: white; color: var(--green); }
-.chat-messages { display: grid; gap: 17px; padding: 21px 2px; overflow-y: auto; max-height: 520px; scrollbar-gutter: stable; }
+.chat-messages { display: grid; flex: 1 1 auto; gap: 17px; min-height: 240px; padding: 21px 2px; overflow-x: hidden; overflow-y: auto; max-height: 520px; scrollbar-gutter: stable; overscroll-behavior: contain; }
 .chat-message { display: grid; grid-template-columns: 30px 1fr; gap: 8px; }
 .chat-message > div { min-width: 0; }
 .chat-message > div > span { font-size: 11px; font-weight: 700; }
 .chat-message time { color: var(--muted); font-weight: 400; margin-left: 5px; }
-.chat-message p { margin-top: 5px; padding: 10px 12px; border-radius: 3px 11px 11px 11px; background: #f4f2ec; color: #50534a; line-height: 1.75; white-space: pre-wrap; }
+.chat-message p { margin-top: 5px; padding: 10px 12px; border-radius: 3px 11px 11px 11px; background: #f4f2ec; color: #50534a; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-message.assistant p { background: var(--green-soft); }
 .typing::after { content: "…"; animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
@@ -1028,8 +1029,12 @@ button.table-row:hover { background: #faf9f4; }
   .benefit-grid, .promise-grid { grid-template-columns: 1fr 1fr; }
   .promise-grid > div { border-bottom: 1px solid var(--line); padding: 12px; }
   .promise-grid > div:nth-child(2) { border-right: 0; }
-  .chat-panel { min-height: 550px; }
-  .chat-messages { max-height: 350px; }
+  .chat-panel { min-height: 0; height: clamp(540px,72svh,660px); overflow: hidden; }
+  .chat-messages { min-height: 180px; max-height: none; padding: 14px 2px; }
+  .quick-prompts > div { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .quick-prompts button { width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .chat-input { scroll-margin-bottom: calc(env(safe-area-inset-bottom) + 12px); }
+  .chat-input textarea { min-height: 72px; font-size: 16px; line-height: 1.4; }
   .notification-popover { position: fixed; top: 64px; left: 12px; right: 12px; width: auto; }
   .suggestion-heading { flex-direction: column; }
   .recommendation-list article { grid-template-columns: 44px 1fr; }
