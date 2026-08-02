@@ -74,6 +74,7 @@ jobs:
           ECS_USER: ${{ secrets.ECS_USER }}
         run: |
           scp scripts/release-deploy.sh "$ECS_USER@$ECS_HOST:/tmp/shao-release-deploy.sh"
+          scp scripts/configure-production-runtime.sh "$ECS_USER@$ECS_HOST:/tmp/shao-configure-runtime.sh"
 
       - name: Let Aliyun download, verify and deploy GitHub artifact
         env:
@@ -92,9 +93,22 @@ jobs:
               --release-sha '$RELEASE_SHA' \
               --token-stdin"
 
+      - name: Configure production integrations without exposing secrets
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          {
+            printf 'DASHSCOPE_API_KEY=%s\n' "$DASHSCOPE_API_KEY"
+            printf 'HERMES_VISION_API_URL=%s\n' 'https://ws-g2167nfpiwg7571u.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions'
+            printf 'HERMES_VISION_MODEL=%s\n' 'qwen3-vl-flash'
+            printf 'WECOM_KF_ACCOUNT_NAME=%s\n' 'AI健康管理服务'
+          } | ssh "$ECS_USER@$ECS_HOST" "bash /tmp/shao-configure-runtime.sh /opt/shao-coach"
+
       - name: Remove temporary controller
         if: always()
         env:
           ECS_HOST: ${{ secrets.ECS_HOST }}
           ECS_USER: ${{ secrets.ECS_USER }}
-        run: ssh "$ECS_USER@$ECS_HOST" "rm -f /tmp/shao-release-deploy.sh"
+        run: ssh "$ECS_USER@$ECS_HOST" "rm -f /tmp/shao-release-deploy.sh /tmp/shao-configure-runtime.sh"
