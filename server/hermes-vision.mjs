@@ -6,7 +6,7 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export function createHermesVisionService({ fetchImpl = fetch } = {}) {
   const apiKey = String(process.env.DASHSCOPE_API_KEY || "").trim();
-  const model = String(process.env.HERMES_VISION_MODEL || "qwen3-vl-flash").trim();
+  const model = String(process.env.HERMES_VISION_MODEL || "qwen3.7-plus").trim();
   const apiUrl = parseProviderUrl(process.env.HERMES_VISION_API_URL || DEFAULT_VISION_API_URL, ["aliyuncs.com"]);
   const configured = Boolean(apiKey && model && apiUrl);
 

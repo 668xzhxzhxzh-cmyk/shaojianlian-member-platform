@@ -16,7 +16,7 @@ function jsonResponse(data, status = 200) {
 
 test("Hermes vision sends image bytes only to the configured Aliyun vision model", async () => {
   process.env.DASHSCOPE_API_KEY = "vision-key";
-  process.env.HERMES_VISION_MODEL = "qwen3-vl-flash";
+  process.env.HERMES_VISION_MODEL = "qwen3.7-plus";
   process.env.HERMES_VISION_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
   let requestBody;
   const service = createHermesVisionService({

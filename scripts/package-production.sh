@@ -44,6 +44,7 @@ cp "$repo_root/scripts/rollback-release.sh" "$stage/release/scripts/"
 cp "$repo_root/scripts/backup-postgres.sh" "$stage/release/scripts/"
 cp "$repo_root/scripts/hermes-desktop-watchdog.sh" "$stage/release/scripts/"
 cp "$repo_root/scripts/configure-wecom-native.py" "$stage/release/scripts/"
+cp "$repo_root/scripts/verify-vision-runtime.mjs" "$stage/release/scripts/"
 for optional_dir in db drizzle; do
   if [[ -d "$repo_root/$optional_dir" ]]; then
     cp -a "$repo_root/$optional_dir" "$stage/release/$optional_dir"

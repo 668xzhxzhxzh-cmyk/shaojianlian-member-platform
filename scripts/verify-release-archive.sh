@@ -30,6 +30,7 @@ test -d "$work/release/node_modules"
 test -f "$work/release/deployment/shao-web.service"
 test -f "$work/release/deployment/shao-api.service"
 test -f "$work/release/scripts/configure-wecom-native.py"
+test -f "$work/release/scripts/verify-vision-runtime.mjs"
 
 if find "$work/release" -type f \( -name '.env' -o -name '.env.*' -o -name '*.pem' -o -name 'id_rsa' -o -name 'id_ed25519' \) -print -quit | grep -q .; then
   echo "运行包包含被禁止的环境文件或私钥。" >&2

@@ -102,7 +102,7 @@ jobs:
           {
             printf 'DASHSCOPE_API_KEY=%s\n' "$DASHSCOPE_API_KEY"
             printf 'HERMES_VISION_API_URL=%s\n' 'https://ws-g2167nfpiwg7571u.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions'
-            printf 'HERMES_VISION_MODEL=%s\n' 'qwen3-vl-flash'
+            printf 'HERMES_VISION_MODEL=%s\n' 'qwen3.7-plus'
             printf 'WECOM_KF_ACCOUNT_NAME=%s\n' 'AI健康管理服务'
           } | ssh "$ECS_USER@$ECS_HOST" "bash /tmp/shao-configure-runtime.sh /opt/shao-coach"
 

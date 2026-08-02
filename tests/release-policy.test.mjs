@@ -68,6 +68,15 @@ test("release controller verifies, stages, health-checks and rolls back", async 
   assert.match(apiService, /\/opt\/shao-coach\/current\/server\/index\.mjs/);
 });
 
+test("production package includes the real Hermes vision probe", async () => {
+  const packageScript = await read("scripts/package-production.sh");
+  const archiveVerification = await read("scripts/verify-release-archive.sh");
+  const runtimeConfiguration = await read("scripts/configure-production-runtime.sh");
+  assert.match(packageScript, /verify-vision-runtime\.mjs/);
+  assert.match(archiveVerification, /verify-vision-runtime\.mjs/);
+  assert.match(runtimeConfiguration, /verify-vision-runtime\.mjs/);
+});
+
 test("project Skill and AGENTS rules require verification before completion", async () => {
   const [skill, agents, flow, checklist] = await Promise.all([
     read(".agents/skills/safe-web-release/SKILL.md"),
