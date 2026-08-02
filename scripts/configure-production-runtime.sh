@@ -63,14 +63,22 @@ systemctl restart shao-api
 
 if ! python3 - <<'PY'
 import json
+import time
 import urllib.request
 
-with urllib.request.urlopen("http://127.0.0.1:8788/health", timeout=15) as response:
-    data = json.load(response)
-integrations = data.get("integrations") or {}
+deadline = time.monotonic() + 30
 required = ("hermes", "wecomCallback", "wecomCustomerService", "hermesVision")
-if not data.get("ok") or not all(integrations.get(name) is True for name in required):
-    raise SystemExit(1)
+while time.monotonic() < deadline:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8788/health", timeout=3) as response:
+            data = json.load(response)
+        integrations = data.get("integrations") or {}
+        if data.get("ok") and all(integrations.get(name) is True for name in required):
+            raise SystemExit(0)
+    except Exception:
+        pass
+    time.sleep(1)
+raise SystemExit(1)
 PY
 then
   cp --preserve=mode,ownership,timestamps "${backup_file}" "${env_file}"
