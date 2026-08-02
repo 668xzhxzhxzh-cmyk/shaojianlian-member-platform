@@ -12,13 +12,14 @@ on:
         required: true
         type: string
       confirm_production:
-        description: "第一次正式部署前必须选择 DEPLOY；选择 NO 只做拒绝检查"
+        description: "DEPLOY 发布；VERIFY_WECOM 只读检查微信客服状态；NO 拒绝"
         required: true
         default: "NO"
         type: choice
         options:
           - "NO"
           - "DEPLOY"
+          - "VERIFY_WECOM"
 
 permissions:
   actions: read
@@ -30,7 +31,7 @@ concurrency:
 
 jobs:
   reject-without-confirmation:
-    if: ${{ inputs.confirm_production != 'DEPLOY' }}
+    if: ${{ inputs.confirm_production == 'NO' }}
     runs-on: ubuntu-latest
     steps:
       - name: Stop before production
@@ -112,3 +113,38 @@ jobs:
           ECS_HOST: ${{ secrets.ECS_HOST }}
           ECS_USER: ${{ secrets.ECS_USER }}
         run: ssh "$ECS_USER@$ECS_HOST" "rm -f /tmp/shao-release-deploy.sh /tmp/shao-configure-runtime.sh"
+
+  verify-wecom:
+    if: ${{ inputs.confirm_production == 'VERIFY_WECOM' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Check out read-only status inspector
+        uses: actions/checkout@v7
+
+      - name: Configure SSH without printing credentials
+        env:
+          ECS_SSH_KEY: ${{ secrets.ECS_SSH_KEY }}
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ECS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$ECS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Inspect sanitized WeChat customer-service state
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          scp scripts/inspect-wecom-customer-status.mjs "$ECS_USER@$ECS_HOST:/tmp/shao-inspect-wecom.mjs"
+          ssh "$ECS_USER@$ECS_HOST" \
+            "node /tmp/shao-inspect-wecom.mjs /opt/shao-coach/.env /opt/shao-coach/current"
+
+      - name: Remove temporary status inspector
+        if: always()
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: ssh "$ECS_USER@$ECS_HOST" "rm -f /tmp/shao-inspect-wecom.mjs"

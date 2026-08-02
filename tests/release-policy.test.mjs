@@ -77,6 +77,16 @@ test("production package includes the real Hermes vision probe", async () => {
   assert.match(runtimeConfiguration, /verify-vision-runtime\.mjs/);
 });
 
+test("production WeChat status inspection is read-only and sanitized", async () => {
+  const deploy = await read(".github/workflows/deploy.yml");
+  const inspector = await read("scripts/inspect-wecom-customer-status.mjs");
+  assert.match(deploy, /VERIFY_WECOM/);
+  assert.match(deploy, /verify-wecom:/);
+  assert.match(inspector, /SELECT msg_id,msg_type,status,result,attempt_count,created_at,updated_at/);
+  assert.doesNotMatch(inspector, /SELECT[^;]*(?:external_userid|member_id|turns_json|payload_json)/i);
+  assert.doesNotMatch(inspector, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP)\b/i);
+});
+
 test("project Skill and AGENTS rules require verification before completion", async () => {
   const [skill, agents, flow, checklist] = await Promise.all([
     read(".agents/skills/safe-web-release/SKILL.md"),
