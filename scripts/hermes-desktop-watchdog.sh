@@ -10,9 +10,10 @@ elif [[ $# -gt 0 ]]; then
 fi
 
 service="hermes-desktop-serve.service"
-status_url="http://127.0.0.1:9119/api/status"
+status_url="http://127.0.0.1:9119/api/health"
 failure_file="/run/shao-hermes-desktop-watchdog.failures"
 lock_file="/run/shao-hermes-desktop-watchdog.lock"
+failure_limit=4
 
 exec 9>"$lock_file"
 flock -n 9 || exit 0
@@ -20,8 +21,8 @@ flock -n 9 || exit 0
 healthy() {
   local response
   systemctl is-active --quiet "$service" || return 1
-  response="$(curl -fsS --max-time 3 "$status_url")" || return 1
-  grep -q '"version"\|"status"' <<<"$response"
+  response="$(curl -fsS --max-time 15 "$status_url")" || return 1
+  grep -Eq '"ok"[[:space:]]*:[[:space:]]*true|"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$response"
 }
 
 if healthy; then
@@ -37,8 +38,8 @@ fi
 failures=$((failures + 1))
 printf '%s\n' "$failures" > "$failure_file"
 
-if [[ "$mode" != "repair" && "$failures" -lt 2 ]]; then
-  logger -t shao-hermes-watchdog "Hermes Desktop backend health check failed once; waiting for confirmation."
+if [[ "$mode" != "repair" && "$failures" -lt "$failure_limit" ]]; then
+  logger -t shao-hermes-watchdog "Hermes Desktop backend health check failed (${failures}/${failure_limit}); waiting for confirmation."
   exit 0
 fi
 

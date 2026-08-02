@@ -463,15 +463,15 @@ small { color: var(--muted); }
 .assistant-scope-note { width: max-content; max-width: 100%; display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 13px; border: 1px solid #d5ddcc; border-radius: 10px; color: var(--green); background: var(--green-soft); }
 .assistant-scope-note > span { display: grid; }
 .assistant-scope-note small { color: var(--muted); font-size: 9px; }
-.assistant-grid { display: grid; grid-template-columns: minmax(280px,.7fr) minmax(560px,1.35fr) minmax(260px,.65fr); gap: 14px; align-items: start; }
-.chat-panel { display: flex; flex-direction: column; min-height: 780px; position: sticky; top: 90px; }
+.assistant-grid { display: grid; grid-template-columns: minmax(390px,1.05fr) minmax(520px,1.25fr) minmax(250px,.62fr); gap: 16px; align-items: start; }
+.chat-panel { display: flex; flex-direction: column; min-height: 820px; position: sticky; top: 90px; }
 .chat-heading, .chat-heading > div { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
 .chat-heading .icon-button.active { color: var(--green); background: var(--green-soft); }
 .chat-history { display: grid; gap: 5px; margin-top: 12px; padding: 10px; border: 1px solid var(--line); background: #faf9f4; border-radius: 9px; }
 .chat-history > b { font-size: 11px; color: var(--muted); }
 .chat-history > button { text-align: left; border: 0; background: transparent; padding: 7px; border-radius: 6px; }
 .chat-history > button:hover { background: white; color: var(--green); }
-.chat-messages { display: grid; gap: 17px; padding: 21px 0; overflow-y: auto; max-height: 430px; }
+.chat-messages { display: grid; gap: 17px; padding: 21px 2px; overflow-y: auto; max-height: 520px; scrollbar-gutter: stable; }
 .chat-message { display: grid; grid-template-columns: 30px 1fr; gap: 8px; }
 .chat-message > div { min-width: 0; }
 .chat-message > div > span { font-size: 11px; font-weight: 700; }
@@ -534,6 +534,7 @@ small { color: var(--muted); }
 .mini-trend:last-child { border-bottom: 0; }
 .agent-status { display: flex; align-items: center; gap: 10px; }
 .agent-status div { display: grid; }
+.agent-status small { margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.45; }
 .agent-status i { margin-left: auto; width: 9px; height: 9px; background: #5f9951; border-radius: 50%; box-shadow: 0 0 0 4px #e6f1e2; }
 .spin { animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -941,7 +942,7 @@ button.table-row:hover { background: #faf9f4; }
   .lower-grid { grid-template-columns: 1fr 1fr; }
   .lower-grid > .card:last-child { grid-column: span 2; }
   .training-layout { grid-template-columns: 1.4fr 1fr 330px; }
-  .assistant-grid { grid-template-columns: 300px minmax(520px,1fr); }
+  .assistant-grid { grid-template-columns: minmax(420px,.9fr) minmax(500px,1.1fr); }
   .evidence-column { grid-column: 2; grid-template-columns: 1fr 1fr; }
   .evidence-column .agent-status { grid-column: span 2; }
   .stats-grid.five { grid-template-columns: repeat(3,1fr); }

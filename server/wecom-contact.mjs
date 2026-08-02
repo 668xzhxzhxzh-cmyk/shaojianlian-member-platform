@@ -97,7 +97,7 @@ export function createWecomContactService({ pool }) {
       });
       return sendJson(response, 201, {
         task,
-        instruction: `草稿已创建。若确认内容无误，请回复：确认发送 task_id=${task.task_id}`,
+        instruction: "草稿已创建。若内容无误，请直接回复：确认发送。系统会在后台安全关联本次任务。",
       });
     }
     if (operation === "confirm_customer_send_task") {
@@ -796,7 +796,7 @@ export function createWecomContactService({ pool }) {
     requireContactConfigured();
     const taskId = normalizeUuid(rawTaskId, "task_id");
     const result = await pool.query(
-      `SELECT id,member_id,external_userid,coach_userid,status,wecom_msgid,provider_message
+      `SELECT id,member_id,external_userid,coach_userid,status,wecom_msgid,provider_message,next_retry_at,delivered_at
        FROM wecom_send_tasks WHERE id=$1 AND coach_userid=$2 LIMIT 1`,
       [taskId, coachUserId],
     );
@@ -825,17 +825,22 @@ export function createWecomContactService({ pool }) {
           ? "failed_frequency_limit"
           : "awaiting_coach_confirmation";
     const providerMessage = providerStatus === 1
-      ? "企业微信报告教练已执行发送"
+      ? "企业微信已报告发送成功（不代表会员已读）"
       : providerStatus === 2
         ? "客户不是教练好友，发送失败"
         : providerStatus === 3
           ? "客户已收到其他群发消息，发送失败"
           : "等待企业微信客户端确认";
+    const nextRetryAt = providerStatus === 3 ? nextChinaMorning() : null;
     await pool.query(
       `UPDATE wecom_send_tasks
-       SET status=$2,provider_message=$3,provider_updated_at=NOW()
+       SET status=$2,
+           provider_message=$3,
+           provider_updated_at=NOW(),
+           next_retry_at=$4,
+           delivered_at=CASE WHEN $2='wecom_reported_sent' THEN COALESCE(delivered_at,NOW()) ELSE delivered_at END
        WHERE id=$1`,
-      [taskId, nextStatus, providerMessage],
+      [taskId, nextStatus, providerMessage, nextRetryAt],
     );
     await auditOperation(coachUserId, "wecom_send_task_status_checked", {
       task_id: taskId,
@@ -847,8 +852,83 @@ export function createWecomContactService({ pool }) {
       member_id: task.member_id,
       status: nextStatus,
       provider_message: providerMessage,
-      member_received: false,
+      member_received: providerStatus === 1,
+      member_read: false,
+      next_retry_at: nextRetryAt,
     };
+  }
+
+  async function reconcileSendTasks({ notifyCoach = async () => {} } = {}) {
+    if (!contactConfigured) return { skipped: "wecom_contact_not_configured", checked: 0, retries: 0 };
+
+    const pending = await pool.query(
+      `SELECT id,coach_userid
+       FROM wecom_send_tasks
+       WHERE status='awaiting_coach_confirmation'
+         AND wecom_msgid IS NOT NULL
+       ORDER BY provider_updated_at NULLS FIRST
+       LIMIT 100`,
+    );
+    let checked = 0;
+    for (const task of pending.rows) {
+      try {
+        const current = await syncSendTaskStatus(task.id, task.coach_userid);
+        checked += 1;
+        if (current.status === "wecom_reported_sent") {
+          await notifyCoach(task.coach_userid, "会员消息已由企业微信报告发送成功；系统不会把“已发送”误写成“已读”。");
+        } else if (current.status === "failed_frequency_limit") {
+          await notifyCoach(task.coach_userid, "本次会员提醒被企业微信接收频率限制拦截，会员未收到。系统已安排到下一可发送窗口自动重建任务，到时请在企业微信客户端再次确认发送。");
+        } else if (current.status === "failed_not_friend") {
+          await notifyCoach(task.coach_userid, "本次会员提醒发送失败：客户已不是当前教练的企业微信好友。请先恢复客户联系后再发送。");
+        }
+      } catch (error) {
+        await auditOperation(task.coach_userid, "wecom_send_task_reconcile_failed", {
+          error: String(error?.message || error).slice(0, 240),
+        });
+      }
+    }
+
+    const due = await pool.query(
+      `SELECT t.id,t.member_id,t.external_userid,t.coach_userid,t.title,t.content,u.name AS member_name
+       FROM wecom_send_tasks t
+       JOIN users u ON u.id=t.member_id
+       WHERE t.status='failed_frequency_limit'
+         AND t.next_retry_at IS NOT NULL
+         AND t.next_retry_at <= NOW()
+         AND NOT EXISTS (SELECT 1 FROM wecom_send_tasks child WHERE child.retry_of=t.id)
+       ORDER BY t.next_retry_at
+       LIMIT 50`,
+    );
+    let retries = 0;
+    for (const original of due.rows) {
+      const retryId = randomUUID();
+      try {
+        const inserted = await pool.query(
+          `INSERT INTO wecom_send_tasks
+             (id,member_id,external_userid,coach_userid,title,content,status,retry_of)
+           VALUES ($1,$2,$3,$4,$5,$6,'draft',$7)
+           ON CONFLICT DO NOTHING
+           RETURNING id`,
+          [retryId, original.member_id, original.external_userid, original.coach_userid, original.title, original.content, original.id],
+        );
+        if (!inserted.rows[0]) continue;
+        await confirmCustomerSendTask(retryId, original.coach_userid);
+        retries += 1;
+        await notifyCoach(original.coach_userid, `“${original.member_name}”的提醒已进入新的发送窗口。发送任务已创建，请在企业微信客户端确认发送。`);
+        await auditOperation(original.coach_userid, "wecom_frequency_retry_task_created", {
+          task_id: retryId,
+          member_id: original.member_id,
+          retry_of: original.id,
+        });
+      } catch (error) {
+        await auditOperation(original.coach_userid, "wecom_frequency_retry_failed", {
+          member_id: original.member_id,
+          error: String(error?.message || error).slice(0, 240),
+        });
+      }
+    }
+
+    return { checked, retries };
   }
 
   function requireCoachUserId(rawCoachUserId) {
@@ -918,7 +998,20 @@ export function createWecomContactService({ pool }) {
     executeCoachOperation,
     handleContactEvent,
     handleInternalTool,
+    reconcileSendTasks,
   };
+}
+
+export function nextChinaMorning(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const midnightUtc = Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), 16, 0, 0, 0);
+  return new Date(midnightUtc + 9 * 60 * 60 * 1000);
 }
 
 function normalizeId(value, label, maxLength = 80) {
@@ -981,7 +1074,9 @@ function publicTask(task) {
     member_id: task.member_id,
     status: task.status,
     provider_message: task.provider_message || null,
-    member_received: false,
+    member_received: task.status === "wecom_reported_sent",
+    member_read: false,
+    next_retry_at: task.next_retry_at || null,
   };
 }
 

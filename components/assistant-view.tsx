@@ -21,10 +21,12 @@ import {
   X,
 } from "lucide-react";
 import { memberRows } from "@/lib/portal-data";
+import { redactConversationText } from "@/lib/public-conversation-text.mjs";
 import { usePortal } from "./portal-context";
 import { Avatar, Card, SectionTitle, TrendChart } from "./ui";
 
 type ChatMessage = { role: "coach" | "assistant"; content: string; time: string };
+type EvolutionReview = { review_date?: string; summary?: string; learned_rules?: string[] };
 
 const quickPrompts = [
   "查看当前会员完整档案",
@@ -52,7 +54,7 @@ export function AssistantView({
     name: state.profile.name,
   };
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "你好，邵教练。我是 Hermes 执行型 AI 助理。请先从右侧选择会员，系统会固定唯一 member_id。你可以直接让我增删或调整私教课程、更新会员档案、训练方案、饮食方案和身体反馈，执行结果会自动同步网站。", time: now() },
+    { role: "assistant", content: "你好，邵教练。我是 Hermes 执行型 AI 助理。请先从右侧选择会员，系统会安全锁定唯一档案。你可以直接让我增删或调整私教课程、更新会员档案、训练方案、饮食方案和身体反馈，执行结果会自动同步网站。", time: now() },
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -62,6 +64,7 @@ export function AssistantView({
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [evidenceTab, setEvidenceTab] = useState<"全部" | "训练" | "身体" | "打卡" | "沟通">("全部");
   const [saveState, setSaveState] = useState("");
+  const [evolutionReview, setEvolutionReview] = useState<EvolutionReview | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const suggestion = state.suggestions[0];
 
@@ -78,6 +81,16 @@ export function AssistantView({
           name: member.name,
           phone: member.phone,
         })));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/hermes/evolution", { credentials: "include" })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const result = await response.json() as { review?: EvolutionReview | null };
+        if (result.review) setEvolutionReview(result.review);
       })
       .catch(() => undefined);
   }, []);
@@ -114,13 +127,7 @@ export function AssistantView({
       });
       if (!response.ok) throw new Error(await response.text());
       if (!response.body) throw new Error("AI 暂时没有返回内容");
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let text = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        text += decoder.decode(value, { stream: true });
+      for await (const text of cumulativeText(response.body)) {
         setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: text } : item));
       }
       await refresh(selectedProfile.id);
@@ -169,7 +176,7 @@ export function AssistantView({
       <section className="page-intro assistant-intro">
         <span className="eyebrow">Hermes Agent · DeepSeek V4 Flash</span>
         <h1>Hermes 教练执行工作台</h1>
-        <p>这里是教练专用的对话与执行入口。先选择网站会员锁定唯一 member_id，再让 Hermes 实际增删课程、调整训练与饮食方案；管理端的“AI 建议管理”只负责审核，不是同一个页面。</p>
+        <p>这里是教练专用的对话与执行入口。选择会员后系统会安全锁定唯一档案，再让 Hermes 实际增删课程、调整训练与饮食方案；管理端的“AI 建议管理”只负责审核，不是同一个页面。</p>
         <div className="assistant-scope-note"><Bot size={20} /><span><b>教练端：对话并执行会员任务</b><small>管理端：审核建议、权限与发送合规</small></span></div>
       </section>
 
@@ -181,7 +188,7 @@ export function AssistantView({
             {messages.map((message, index) => (
               <div className={`chat-message ${message.role}`} key={`${message.time}-${index}`}>
                 <Avatar name={message.role === "coach" ? "邵教练" : "H"} size="sm" />
-                <div><span>{message.role === "coach" ? "邵教练" : "AI 助理"} <time>{message.time}</time></span><p>{message.content || <i className="typing">正在分析会员数据</i>}</p></div>
+                <div><span>{message.role === "coach" ? "邵教练" : "AI 助理"} <time>{message.time}</time></span><p>{message.content ? redactConversationText(message.content, { memberIds: [selectedProfile.id] }) : <i className="typing">正在分析会员数据</i>}</p></div>
               </div>
             ))}
           </div>
@@ -232,7 +239,7 @@ export function AssistantView({
             <MiniTrend title="体脂率（%）" data={chartData} dataKey="bodyFat" />
           </Card>
           <Card className="agent-status">
-            <Bot size={24} /><div><b>AI 服务正常</b><span>DeepSeek 模型 · 鄂州服务区</span></div><i />
+            <Bot size={24} /><div><b>AI 服务正常</b><span>DeepSeek 模型 · 鄂州服务区</span>{evolutionReview ? <small title={evolutionReview.summary}>每日复盘已开启 · {String(evolutionReview.review_date || "今日").slice(0, 10)} · {evolutionReview.learned_rules?.length ?? 0} 条规则</small> : <small>每日复盘已开启 · 等待首次运行</small>}</div><i />
           </Card>
         </div>
       </div>
@@ -256,6 +263,18 @@ export function AssistantView({
       ) : null}
     </div>
   );
+}
+
+async function* cumulativeText(body: ReadableStream<Uint8Array>) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    yield text;
+  }
 }
 
 function Recommendation({ icon: Icon, title, text, source, editing, onEdit }: { icon: typeof Dumbbell; title: string; text: string; source: string; editing: boolean; onEdit: () => void }) {

@@ -1,3 +1,5 @@
+import { redactConversationText } from "../lib/public-conversation-text.mjs";
+
 const MEMBER_ID_PATTERN = /\bmember_id\s*[=:：]\s*([A-Za-z0-9][A-Za-z0-9_-]{0,127})/i;
 
 export const WECOM_HERMES_REPLY_LIMIT = 160;
@@ -69,8 +71,8 @@ export async function resolveWecomMemberContext({
   };
 }
 
-export function compactWecomHermesReply(value, limit = WECOM_HERMES_REPLY_LIMIT) {
-  const normalized = String(value || "")
+export function compactWecomHermesReply(value, limit = WECOM_HERMES_REPLY_LIMIT, { memberIds = [] } = {}) {
+  const normalized = redactConversationText(value, { memberIds })
     .replace(/\r\n?/g, "\n")
     .replace(/[ \t]*\n[ \t]*/g, "\n")
     .replace(/[ \t]+/g, " ")

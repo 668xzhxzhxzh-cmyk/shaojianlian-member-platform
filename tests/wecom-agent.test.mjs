@@ -84,6 +84,16 @@ test("WeCom Hermes replies are normalized and kept concise", () => {
   assert.ok(compact.endsWith("…"));
 });
 
+test("WeCom Hermes replies hide internal identifiers from the coach", () => {
+  const compact = compactWecomHermesReply(
+    "已为 member_id=member-li 创建 task_id=13e21b3d-54b8-46dc-8e65-05862cc084e8，session_id=course-77。member-li 已同步。",
+    undefined,
+    { memberIds: ["member-li"] },
+  );
+  assert.doesNotMatch(compact, /task_id|member_id|session_id|13e21b3d|member-li/i);
+  assert.match(compact, /当前会员/);
+});
+
 test("WeCom sends only intent-relevant member data to reduce tokens", () => {
   const state = {
     profile: { name: "🐻🐻君" },
