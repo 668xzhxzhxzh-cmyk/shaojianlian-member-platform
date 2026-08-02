@@ -89,7 +89,8 @@ fi
 
 if ! node "${base_dir}/current/scripts/verify-vision-runtime.mjs" \
   "${env_file}" \
-  "${base_dir}/current/server/hermes-vision.mjs"
+  "${base_dir}/current/server/hermes-vision.mjs" \
+  "${base_dir}/current/web/public/coach-portrait.jpg"
 then
   cp --preserve=mode,ownership,timestamps "${backup_file}" "${env_file}"
   systemctl restart shao-api
