@@ -119,6 +119,35 @@ test("WeCom callback AES-decrypts POST messages before dispatch", async () => {
   });
 });
 
+test("WeCom callback acknowledges before slow agent processing finishes", async () => {
+  configure();
+  let started = false;
+  let releaseAgent;
+  const agentFinished = new Promise((resolve) => { releaseAgent = resolve; });
+  const service = createWecomCallbackService({
+    onMessage: async () => {
+      started = true;
+      await agentFinished;
+    },
+  });
+  const innerXml = `<xml><ToUserName><![CDATA[${corpId}]]></ToUserName><FromUserName><![CDATA[coach-1]]></FromUserName><CreateTime>1785590400</CreateTime><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[分析会员训练计划]]></Content><AgentID>1000002</AgentID><MsgId>msg-slow-agent</MsgId></xml>`;
+  const encrypted = encrypt(innerXml);
+  const url = callbackUrl(encrypted);
+  url.searchParams.delete("echostr");
+  const res = response();
+
+  await service.handle(
+    request("POST", `<xml><Encrypt><![CDATA[${encrypted}]]></Encrypt></xml>`),
+    res,
+    url,
+  );
+
+  assert.equal(started, true);
+  assert.equal(res.status, 200);
+  assert.equal(res.body, "success");
+  releaseAgent();
+});
+
 test("WeCom callback dispatches an authenticated add-customer event by coach UserID", async () => {
   configure();
   let received;

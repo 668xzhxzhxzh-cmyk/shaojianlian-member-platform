@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   compactWecomHermesReply,
   resolveWecomMemberContext,
+  selectRelevantMemberState,
   WECOM_HERMES_REPLY_LIMIT,
 } from "../server/wecom-agent.mjs";
 
@@ -83,14 +84,29 @@ test("WeCom Hermes replies are normalized and kept concise", () => {
   assert.ok(compact.endsWith("…"));
 });
 
+test("WeCom sends only intent-relevant member data to reduce tokens", () => {
+  const state = {
+    profile: { name: "🐻🐻君" },
+    bookings: [{ id: "course-1" }],
+    trainingPlan: { goal: "增肌" },
+    nutritionPlan: { calories: 1800 },
+    bodyMetrics: [{ weight: 70 }],
+    suggestions: ["很长的无关数据"],
+  };
+  const course = selectRelevantMemberState(state, "删除这节课");
+  assert.deepEqual(course.bookings, [{ id: "course-1" }]);
+  assert.equal(course.trainingPlan, undefined);
+  assert.equal(course.nutritionPlan, undefined);
+  assert.equal(course.suggestions, undefined);
+});
+
 test("Hermes WeCom prompt executes complete additive changes without confirmation", async () => {
   const source = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../server/index.mjs", import.meta.url), "utf8"));
-  assert.match(source, /所需参数齐全时立即调用最窄的 MCP 工具执行/);
-  assert.match(source, /不要先复述，不要再问“是否确认”/);
-  assert.match(source, /不得误解为提醒会员、创建消息或待办/);
-  assert.match(source, /当前完整指令本身就是执行授权/);
-  assert.match(source, /绝不要再次要求教练确认会员或重发 member_id/);
-  assert.match(source, /仅两类操作必须二次确认：删除课程，以及创建企业微信客户发送任务/);
-  assert.match(source, /下一条收到“确认删除”后直接使用系统上下文中的精确 member_id 和 session_id/);
+  assert.match(source, /参数齐全就调用最窄工具执行/);
+  assert.match(source, /系统已给出时不得再次索要/);
+  assert.match(source, /createHermesCommandRouter/);
+  assert.match(source, /enqueueWecomCoachMessage/);
+  assert.match(source, /temperature: 0\.1/);
+  assert.match(source, /max_tokens: 480/);
   assert.match(source, /\.\.\.conversation\.turns/);
 });

@@ -6,12 +6,12 @@ import pg from "pg";
 import { createWecomContactService } from "./wecom-contact.mjs";
 import { createWecomCallbackService } from "./wecom-callback.mjs";
 import { createWecomAppService } from "./wecom-app.mjs";
+import { createHermesCommandRouter } from "./hermes-command-router.mjs";
 import { compactWecomHermesReply, resolveWecomMemberContext } from "./wecom-agent.mjs";
 import {
   createWecomConversationStore,
   isContextualFollowUp,
   isCourseReference,
-  selectLatestCourseSessionId,
 } from "./wecom-conversation.mjs";
 
 const { Pool } = pg;
@@ -83,21 +83,19 @@ const seedState = {
   ],
 };
 
-const hermesPrompt = `你是邵教练专属会员平台唯一的 Hermes 执行型管理智能体，具备 shao-coach MCP 工具。企业微信回复必须简洁、自然、可执行：不要寒暄，不解释平台规则，不罗列能力或候选操作，通常只回复 1 至 3 个短句且不超过 120 个汉字。
+const hermesPrompt = `你是邵教练的 Hermes 会员管理管家，具备 shao-coach MCP 工具。只使用系统已验证的精确 member_id；系统已给出时不得再次索要。参数齐全就调用最窄工具执行，参数不足只追问缺失项。
 
-会员身份只能使用已经验证的精确 member_id。系统上下文若说明会员已由有效绑定关系唯一解析，就必须直接使用其中的 member_id；这不是昵称猜测，绝不要再次要求教练确认会员或重发 member_id。没有唯一解析结果时，只问一次精确 member_id，不输出冗长说明。
-
-新增课程、调整课程、训练方案、饮食方案、身体反馈和会员计划属于教练已授权的日常管理：所需参数齐全时立即调用最窄的 MCP 工具执行，不要先复述，不要再问“是否确认”。“添加/加一节/安排/排一节 + 日期时间 + 课程内容”必须按新增课程执行，不得误解为提醒会员、创建消息或待办；当前完整指令本身就是执行授权。调用 add_private_session 时把日期规范为 M/D、时间规范为 HH:MM–HH:MM，并使用由 member_id、日期和开始时间组成的稳定 request_id，执行后核验一次。成功只回复类似：已为🐻🐻君添加 8月4日 18:00–19:00 训练放松课，网站已同步。
-
-仅两类操作必须二次确认：删除课程，以及创建企业微信客户发送任务。教练说“删除这节课”且系统已提供最近课程的精确 session_id 时，只需简短回复“确认删除某会员某时段课程？请回复确认删除”；下一条收到“确认删除”后直接使用系统上下文中的精确 member_id 和 session_id 调用删除工具，不得再次索要这两个 id。客户消息先创建草稿并要求“确认发送 task_id=...”。未获得真实发送状态前不得说会员已收到。缺少日期、时间或课程内容时只追问缺失项。不要回答“没有这个工具”，应先检查可用 MCP 工具。不做医疗诊断。`;
+企业微信回复只写结果或一个必要问题，不寒暄、不解释规则、不列能力，最多 3 个短句、120 个汉字。训练、饮食、身体反馈等修改执行后核验网站状态。删除课程和客户发送任务必须按系统规定确认；未取得真实发送状态不得说会员已收到。不要声称没有工具，先检查 MCP。不做医疗诊断。`;
 
 await initializeDatabase();
 const wecomConversation = createWecomConversationStore({ pool });
 const wecomContact = createWecomContactService({ pool });
 const wecomApp = createWecomAppService();
+const hermesCommandRouter = createHermesCommandRouter({ wecomContact });
+const wecomCoachQueues = new Map();
 const wecomCallback = createWecomCallbackService({
   onMessage: async (message) => {
-    await handleWecomCoachMessage(message);
+    await enqueueWecomCoachMessage(message);
   },
   onContactEvent: async (message) => {
     await wecomContact.handleContactEvent(message);
@@ -240,9 +238,11 @@ async function initializeDatabase() {
       coach_userid TEXT PRIMARY KEY,
       member_id TEXT REFERENCES users(id) ON DELETE SET NULL,
       session_id TEXT,
+      pending_json JSONB,
       turns_json JSONB NOT NULL DEFAULT '[]',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE wecom_coach_conversations ADD COLUMN IF NOT EXISTS pending_json JSONB;
     CREATE INDEX IF NOT EXISTS audit_log_actor_date_idx ON audit_log(actor_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS notifications_status_date_idx ON notifications(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS member_wecom_bindings_coach_idx ON member_wecom_bindings(coach_userid, status);
@@ -623,6 +623,7 @@ async function handleHermes(request, response, session) {
 }
 
 async function handleWecomCoachMessage(message) {
+  const startedAt = Date.now();
   const coachUserId = String(message.fromUserName || "").trim();
   const dedupeKey = String(message.msgId || "").trim() || createHash("sha256")
     .update([coachUserId, message.createTime, message.msgType, message.event, message.content].join("\u0000"), "utf8")
@@ -654,7 +655,7 @@ async function handleWecomCoachMessage(message) {
     if (result.content) {
       const sessionId = await resolveConversationSessionId({
         memberId: result.memberId,
-        previousSessionId: result.previousSessionId,
+        previousSessionId: result.sessionId || result.previousSessionId,
         content: result.content,
         reply: compactReply,
       });
@@ -662,6 +663,9 @@ async function handleWecomCoachMessage(message) {
         coachUserId,
         memberId: result.memberId,
         sessionId,
+        pendingAction: result.pendingAction,
+        clearPending: result.clearPending,
+        clearSession: result.clearSession,
         userContent: result.content,
         assistantContent: compactReply,
       });
@@ -673,6 +677,8 @@ async function handleWecomCoachMessage(message) {
     await audit(coachUserId, "wecom_callback_replied", {
       msgId: message.msgId,
       replyLength: compactReply.length,
+      route: result.fastPath || "hermes_model",
+      durationMs: Date.now() - startedAt,
     });
   } catch (error) {
     const safeMessage = error instanceof Error ? error.message.slice(0, 400) : "企业微信消息处理失败";
@@ -681,20 +687,25 @@ async function handleWecomCoachMessage(message) {
       [dedupeKey, safeMessage],
     );
     await audit(coachUserId, "wecom_callback_failed", { msgId: message.msgId, error: safeMessage });
+    await wecomApp.sendText({
+      toUserId: coachUserId,
+      content: "这条指令处理失败了，请稍后重试；系统没有把失败操作当作已完成。",
+    }).catch(() => {});
     throw error;
   }
 }
 
-async function requestHermesWecomReply(message) {
-  if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) {
-    throw new Error("Hermes API 尚未配置");
-  }
-  const hermesApi = new URL(process.env.HERMES_API_URL);
-  const allowedHosts = new Set(["127.0.0.1", "localhost", "host.docker.internal"]);
-  if (!["http:", "https:"].includes(hermesApi.protocol) || !allowedHosts.has(hermesApi.hostname)) {
-    throw new Error("Hermes API 必须使用服务器私有回环地址");
-  }
+function enqueueWecomCoachMessage(message) {
+  const coachUserId = String(message.fromUserName || "").trim();
+  const previous = wecomCoachQueues.get(coachUserId) || Promise.resolve();
+  const current = previous.catch(() => {}).then(() => handleWecomCoachMessage(message));
+  wecomCoachQueues.set(coachUserId, current);
+  return current.finally(() => {
+    if (wecomCoachQueues.get(coachUserId) === current) wecomCoachQueues.delete(coachUserId);
+  });
+}
 
+async function requestHermesWecomReply(message) {
   const content = String(message.content || "").trim().slice(0, 4000);
   const conversation = await wecomConversation.load(message.fromUserName);
   const useConversationMember = isContextualFollowUp(content);
@@ -710,10 +721,29 @@ async function requestHermesWecomReply(message) {
     content,
     previousSessionId: conversation.sessionId,
   };
+  const fastPath = await hermesCommandRouter.route({
+    content,
+    coachUserId: message.fromUserName,
+    resolvedMember,
+    conversation,
+  });
+  if (fastPath) return {
+    ...fastPath,
+    content,
+    previousSessionId: conversation.sessionId,
+  };
+
+  if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) {
+    throw new Error("Hermes API 尚未配置");
+  }
+  const hermesApi = new URL(process.env.HERMES_API_URL);
+  const allowedHosts = new Set(["127.0.0.1", "localhost", "host.docker.internal"]);
+  if (!["http:", "https:"].includes(hermesApi.protocol) || !allowedHosts.has(hermesApi.hostname)) {
+    throw new Error("Hermes API 必须使用服务器私有回环地址");
+  }
   const memberContext = resolvedMember.context;
-  const recentSessionId = conversation.sessionId
-    || (useConversationMember ? selectLatestCourseSessionId(resolvedMember.member?.state_json) : "");
-  const recentCourseContext = (isCourseReference(content) || /^确认删除\s*$/.test(content)) && recentSessionId
+  const recentSessionId = conversation.sessionId;
+  const recentCourseContext = (isCourseReference(content) || /^确认删除/.test(content)) && recentSessionId
     ? `最近对话或当前唯一有效绑定中已验证的课程 session_id=${recentSessionId}。遇到“这节课/确认删除”等指代时先用 get_member_by_id 核验该课程；存在时直接使用，不要再次索要 member_id 或 session_id。`
     : "本条没有可引用的最近课程 session_id。";
 
@@ -727,6 +757,8 @@ async function requestHermesWecomReply(message) {
     body: JSON.stringify({
       model: "hermes-agent",
       stream: true,
+      temperature: 0.1,
+      max_tokens: 480,
       messages: [
         { role: "system", content: hermesPrompt },
         { role: "system", content: `当前请求来自已通过企业微信签名、AES 解密和 userid 白名单验证的自建应用教练 userid=${message.fromUserName}。${memberContext}${recentCourseContext}` },
@@ -734,7 +766,7 @@ async function requestHermesWecomReply(message) {
         { role: "user", content },
       ],
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(60000),
   });
   if (!upstream.ok || !upstream.body) throw new Error(`Hermes API 暂时不可用（status=${upstream.status}）`);
 
@@ -754,8 +786,7 @@ async function resolveConversationSessionId({ memberId, previousSessionId, conte
   }
   const explicitSessionId = `${content}\n${reply}`.match(/\bsession_id\s*[=:：]\s*([A-Za-z0-9][A-Za-z0-9_-]{0,127})/i)?.[1];
   if (explicitSessionId) return explicitSessionId;
-  const result = await pool.query("SELECT state_json FROM portal_state WHERE user_id=$1 LIMIT 1", [memberId]);
-  return selectLatestCourseSessionId(result.rows[0]?.state_json) || previousSessionId || "";
+  return previousSessionId || "";
 }
 
 async function collectHermesReply(body) {

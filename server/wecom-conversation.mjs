@@ -1,6 +1,6 @@
 const CONVERSATION_TTL_HOURS = 24;
-const MAX_TURNS = 10;
-const MAX_CONTENT_LENGTH = 1200;
+const MAX_TURNS = 6;
+const MAX_CONTENT_LENGTH = 360;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 export function createWecomConversationStore({ pool }) {
@@ -9,7 +9,7 @@ export function createWecomConversationStore({ pool }) {
       const coach = String(coachUserId || "").trim();
       if (!coach) return emptyConversation();
       const result = await pool.query(
-        `SELECT member_id,session_id,turns_json,updated_at
+        `SELECT member_id,session_id,pending_json,turns_json,updated_at
          FROM wecom_coach_conversations
          WHERE coach_userid=$1
            AND updated_at >= NOW() - ($2 * INTERVAL '1 hour')
@@ -19,25 +19,42 @@ export function createWecomConversationStore({ pool }) {
       return normalizeConversation(result.rows[0]);
     },
 
-    async saveTurn({ coachUserId, memberId, sessionId, userContent, assistantContent }) {
+    async saveTurn({
+      coachUserId,
+      memberId,
+      sessionId,
+      pendingAction,
+      clearPending = false,
+      clearSession = false,
+      userContent,
+      assistantContent,
+    }) {
       const coach = String(coachUserId || "").trim();
       if (!coach) return emptyConversation();
       const current = await this.load(coach);
       const next = {
         memberId: validId(memberId) || current.memberId,
-        sessionId: validId(sessionId) || current.sessionId,
+        sessionId: clearSession ? "" : (validId(sessionId) || current.sessionId),
+        pendingAction: clearPending ? null : (normalizePendingAction(pendingAction) || current.pendingAction),
         turns: appendConversationTurns(current.turns, userContent, assistantContent),
       };
       await pool.query(
         `INSERT INTO wecom_coach_conversations
-           (coach_userid,member_id,session_id,turns_json,updated_at)
-         VALUES ($1,$2,$3,$4,NOW())
+           (coach_userid,member_id,session_id,pending_json,turns_json,updated_at)
+         VALUES ($1,$2,$3,$4,$5,NOW())
          ON CONFLICT (coach_userid) DO UPDATE
          SET member_id=EXCLUDED.member_id,
              session_id=EXCLUDED.session_id,
+             pending_json=EXCLUDED.pending_json,
              turns_json=EXCLUDED.turns_json,
              updated_at=NOW()`,
-        [coach, next.memberId || null, next.sessionId || null, JSON.stringify(next.turns)],
+        [
+          coach,
+          next.memberId || null,
+          next.sessionId || null,
+          next.pendingAction ? JSON.stringify(next.pendingAction) : null,
+          JSON.stringify(next.turns),
+        ],
       );
       return next;
     },
@@ -49,7 +66,11 @@ export function isContextualFollowUp(value) {
   if (!text || text.length > 80) return false;
   return /^(?:请)?(?:把|将)?(?:删除|取消|修改|调整|更新|查看|查询|改)?(?:一下)?(?:这|刚才|上面|前面)/.test(text)
     || /^(?:请)?(?:给)?(?:他|她|TA|ta|这个会员|该会员)/.test(text)
-    || /^(?:确认删除|确认发送|确认|继续|好的?|可以|是)$/.test(text);
+    || /^(?:删除|取消)(?:掉|一下)?(?:这|刚才|上面|前面)/.test(text)
+    || /^(?:增加|添加|安排|加|排)(?:一节)?\d/.test(text)
+    || /^(?:调整|修改|更新|查看|查询)(?:当前|这个|该)会员/.test(text)
+    || /^(?:确认删除|确认发送).*$/.test(text)
+    || /^(?:确认|继续|好的?|可以|是)$/.test(text);
 }
 
 export function isCourseReference(value) {
@@ -79,8 +100,17 @@ export function normalizeConversation(row) {
   return {
     memberId: validId(row.member_id),
     sessionId: validId(row.session_id),
+    pendingAction: normalizePendingAction(row.pending_json),
     turns: normalizeTurns(row.turns_json),
   };
+}
+
+export function normalizePendingAction(value) {
+  if (!value || value.type !== "delete_course") return null;
+  const memberId = validId(value.memberId);
+  const sessionId = validId(value.sessionId);
+  if (!memberId || !sessionId) return null;
+  return { type: "delete_course", memberId, sessionId };
 }
 
 function normalizeTurns(value) {
@@ -102,5 +132,5 @@ function validId(value) {
 }
 
 function emptyConversation() {
-  return { memberId: "", sessionId: "", turns: [] };
+  return { memberId: "", sessionId: "", pendingAction: null, turns: [] };
 }

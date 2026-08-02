@@ -38,7 +38,10 @@ verify_release_tree() {
   test -f "$root/deployment/shao-api.service"
   test -f "$root/deployment/shao-backup.service"
   test -f "$root/deployment/shao-backup.timer"
+  test -f "$root/deployment/hermes-desktop-watchdog.service"
+  test -f "$root/deployment/hermes-desktop-watchdog.timer"
   test -f "$root/scripts/backup-postgres.sh"
+  test -f "$root/scripts/hermes-desktop-watchdog.sh"
   if find "$root" -type f \( -name '.env' -o -name '.env.*' -o -name '*.pem' -o -name 'id_rsa' -o -name 'id_ed25519' \) -print -quit | grep -q .; then
     echo "运行包包含环境文件或私钥，拒绝继续。" >&2
     return 1
@@ -82,7 +85,7 @@ if [[ "$token_stdin" != 1 || -z "$artifact_url" ]]; then
   exit 1
 fi
 
-for command_name in curl unzip sha256sum tar node systemctl systemd-run; do
+for command_name in curl unzip sha256sum tar node systemctl systemd-run flock; do
   command -v "$command_name" >/dev/null || {
     echo "服务器缺少命令：$command_name" >&2
     exit 1
@@ -196,6 +199,7 @@ chown -R shaoapp:shaoapp "$release_dir"
 # 已校验的不可变运行包刷新它，确保定时任务与仓库版本一致。
 install -d -m 0755 "$base_dir/scripts"
 install -m 0755 "$release_dir/scripts/backup-postgres.sh" "$base_dir/scripts/backup-postgres.sh"
+install -m 0755 "$release_dir/scripts/hermes-desktop-watchdog.sh" "$base_dir/scripts/hermes-desktop-watchdog.sh"
 
 echo "在候选端口 3300/8988 启动新版本，不影响 Nginx 的 3000/8788 现网端口。"
 candidate_env="$work/candidate-api.env"
@@ -253,8 +257,15 @@ install -m 0644 "$release_dir/deployment/shao-web.service" /etc/systemd/system/s
 install -m 0644 "$release_dir/deployment/shao-api.service" /etc/systemd/system/shao-api.service
 install -m 0644 "$release_dir/deployment/shao-backup.service" /etc/systemd/system/shao-backup.service
 install -m 0644 "$release_dir/deployment/shao-backup.timer" /etc/systemd/system/shao-backup.timer
+install -m 0644 "$release_dir/deployment/hermes-desktop-watchdog.service" /etc/systemd/system/hermes-desktop-watchdog.service
+install -m 0644 "$release_dir/deployment/hermes-desktop-watchdog.timer" /etc/systemd/system/hermes-desktop-watchdog.timer
 systemctl daemon-reload
 systemctl enable --now shao-backup.timer
+systemctl enable --now hermes-desktop-watchdog.timer
+
+# systemd considers a hung process active. Verify the application endpoint and
+# repair the existing single Hermes Desktop backend before switching the site.
+bash "$base_dir/scripts/hermes-desktop-watchdog.sh" --repair
 
 atomic_link "$previous_release" "$base_dir/previous"
 atomic_link "$release_dir" "$base_dir/current"
@@ -264,7 +275,7 @@ systemctl restart shao-api.service
 systemctl restart shao-web.service
 wait_for_runtime http://127.0.0.1:3000 http://127.0.0.1:8788
 bash "$release_dir/scripts/release-health-check.sh" \
-  --public-base http://127.0.0.1 --check-services
+  --public-base http://127.0.0.1 --check-services --check-hermes
 
 switched=0
 

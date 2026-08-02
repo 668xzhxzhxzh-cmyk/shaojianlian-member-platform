@@ -41,6 +41,7 @@ mkdir -p "$stage/release/scripts"
 cp "$repo_root/scripts/release-health-check.sh" "$stage/release/scripts/"
 cp "$repo_root/scripts/rollback-release.sh" "$stage/release/scripts/"
 cp "$repo_root/scripts/backup-postgres.sh" "$stage/release/scripts/"
+cp "$repo_root/scripts/hermes-desktop-watchdog.sh" "$stage/release/scripts/"
 cp "$repo_root/scripts/configure-wecom-native.py" "$stage/release/scripts/"
 for optional_dir in db drizzle; do
   if [[ -d "$repo_root/$optional_dir" ]]; then

@@ -117,6 +117,24 @@ export function createWecomContactService({ pool }) {
     return sendJson(response, 400, { error: "不支持的 AI 管理工具操作" });
   }
 
+  async function executeCoachOperation(body) {
+    const operation = String(body?.operation || "");
+    const coachUserId = requireCoachUserId(body?.coach_userid);
+    if (operation === "get_member_by_id") {
+      return { member: await getMemberById(body.member_id, coachUserId) };
+    }
+    if (operation === "add_private_session") {
+      return addPrivateSession(body, coachUserId);
+    }
+    if (operation === "update_private_session") {
+      return updatePrivateSession(body, coachUserId);
+    }
+    if (operation === "delete_private_session") {
+      return deletePrivateSession(body, coachUserId);
+    }
+    throw publicError(400, "该操作不支持 Hermes 确定性快速通道");
+  }
+
   async function getMemberById(rawMemberId, coachUserId) {
     const memberId = normalizeId(rawMemberId, "member_id");
     const result = await pool.query(
@@ -897,6 +915,7 @@ export function createWecomContactService({ pool }) {
   return {
     contactConfigured,
     toolsConfigured,
+    executeCoachOperation,
     handleContactEvent,
     handleInternalTool,
   };

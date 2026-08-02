@@ -54,11 +54,14 @@ test("release controller verifies, stages, health-checks and rolls back", async 
   assert.match(controller, /PORT=3300/);
   assert.match(controller, /scripts\/backup-postgres\.sh/);
   assert.match(controller, /enable --now shao-backup\.timer/);
+  assert.match(controller, /enable --now hermes-desktop-watchdog\.timer/);
+  assert.match(controller, /hermes-desktop-watchdog\.sh" --repair/);
   assert.match(controller, /atomic_link "\$release_dir" "\$base_dir\/current"/);
   assert.match(controller, /新版本验证失败，正在自动恢复旧版本/);
   assert.match(controller, /release_dirs/);
   assert.match(packageScript, /npm ci --prefix "\$stage\/release" --omit=dev/);
   assert.match(packageScript, /scripts\/backup-postgres\.sh/);
+  assert.match(packageScript, /scripts\/hermes-desktop-watchdog\.sh/);
   assert.match(packageScript, /运行包疑似包含真实密钥/);
   assert.match(webService, /\/opt\/shao-coach\/current\/web\/server\.js/);
   assert.match(apiService, /\/opt\/shao-coach\/current\/server\/index\.mjs/);
