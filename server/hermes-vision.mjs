@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
+
 const DEFAULT_VISION_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
-const DEFAULT_DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
@@ -52,29 +53,35 @@ export function createHermesVisionService({ fetchImpl = fetch } = {}) {
 }
 
 export function createHermesCustomerReplyService({ fetchImpl = fetch } = {}) {
-  const apiKey = String(process.env.DEEPSEEK_API_KEY || "").trim();
-  const model = String(process.env.DEEPSEEK_MODEL || "deepseek-v4-flash").trim();
-  const apiUrl = parseProviderUrl(process.env.DEEPSEEK_API_URL || DEFAULT_DEEPSEEK_API_URL, ["deepseek.com"]);
+  const apiKey = String(process.env.HERMES_API_KEY || "").trim();
+  const model = "hermes-agent";
+  const apiUrl = parseHermesUrl(process.env.HERMES_API_URL || "");
   const configured = Boolean(apiKey && model && apiUrl);
 
-  async function reply({ memberName, memberState, customerText = "", imageDescription = "" }) {
+  async function reply({ externalUserId, memberName, memberState, customerText = "", imageDescription = "", history = [] }) {
     if (!configured) throw publicError(503, "Hermes 客户回复模型尚未配置");
     const safeState = selectCustomerVisibleState(memberState);
-    const response = await fetchImpl(apiUrl, {
+    const safeHistory = normalizeHistory(history);
+    const response = await fetchImpl(new URL("/v1/chat/completions", apiUrl), {
       method: "POST",
       headers: {
         authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
+        "x-hermes-session-key": customerSessionKey(externalUserId),
       },
       body: JSON.stringify({
         model,
+        stream: false,
+        tools: [],
+        tool_choice: "none",
         temperature: 0.2,
         max_tokens: 260,
         messages: [
           {
             role: "system",
-            content: "你是邵教练会员平台的 Hermes 客户助理。当前请求来自已验证并精确绑定的会员本人。只能依据给出的本人档案回答，不能调用管理工具、不能修改数据、不能查看其他会员。回答简洁自然，最多 3 个短句、120 个汉字；不展示 member_id、external_userid 或内部编号。涉及伤痛、用药、疾病时不诊断，建议停止相关训练并联系教练或专业医务人员。图片描述来自只读视觉技能，若描述不确定必须明确说明。",
+            content: "你是服务器上唯一 Hermes 的会员客服会话。当前请求来自已通过 external_userid 精确绑定的会员本人。此会话强制只读且未提供任何工具：只能依据给出的本人档案和最近对话回答，不能调用管理工具、不能修改数据、不能查看其他会员。回答简洁自然，最多 3 个短句、120 个汉字；不展示 member_id、external_userid 或内部编号。涉及伤痛、用药、疾病时不诊断，建议停止相关训练并联系教练或专业医务人员。图片描述来自百炼视觉技能，若描述不确定必须明确说明；把图片问题当作当前对话的一部分，不要声称看不到图片。",
           },
+          ...safeHistory,
           {
             role: "user",
             content: JSON.stringify({
@@ -95,6 +102,22 @@ export function createHermesCustomerReplyService({ fetchImpl = fetch } = {}) {
   }
 
   return { configured, reply };
+}
+
+function normalizeHistory(history) {
+  if (!Array.isArray(history)) return [];
+  return history.slice(-8).flatMap((turn) => {
+    if (!turn || typeof turn !== "object") return [];
+    const role = turn.role === "assistant" ? "assistant" : turn.role === "user" ? "user" : "";
+    const content = String(turn.content || "").trim().slice(0, 600);
+    return role && content ? [{ role, content }] : [];
+  });
+}
+
+function customerSessionKey(externalUserId) {
+  const value = String(externalUserId || "").trim();
+  if (!value) throw publicError(400, "客户会话标识无效");
+  return `wecom-kf:${createHash("sha256").update(value).digest("hex").slice(0, 32)}`;
 }
 
 export function compactCustomerReply(value, limit = 120) {
@@ -131,6 +154,16 @@ function parseProviderUrl(value, allowedSuffixes) {
     const url = new URL(String(value || ""));
     const allowed = url.protocol === "https:" && allowedSuffixes.some((suffix) => url.hostname === suffix || url.hostname.endsWith(`.${suffix}`));
     return allowed ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseHermesUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "host.docker.internal"].includes(url.hostname)) return null;
+    return url;
   } catch {
     return null;
   }

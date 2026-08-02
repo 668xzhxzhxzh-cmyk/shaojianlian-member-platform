@@ -132,11 +132,6 @@ const wecomCallback = createWecomCallbackService({
   onContactEvent: async (message) => {
     await wecomContact.handleContactEvent(message);
   },
-});
-const wecomCustomerCallback = createWecomCallbackService({
-  callbackToken: process.env.WECOM_KF_CALLBACK_TOKEN || "",
-  callbackAesKey: process.env.WECOM_KF_CALLBACK_AES_KEY || "",
-  receiverId: process.env.WECOM_CORP_ID || "",
   onCustomerServiceEvent: async (message) => {
     await wecomCustomerService.handleEvent(message);
   },
@@ -158,7 +153,7 @@ const server = createServer(async (request, response) => {
         wecomContact: wecomContact.contactConfigured,
         wecomCallback: wecomCallback.callbackConfigured,
         wecomApp: wecomApp.appConfigured,
-        wecomCustomerService: wecomCustomerService.configured && wecomCustomerCallback.callbackConfigured,
+        wecomCustomerService: wecomCustomerService.configured && wecomCallback.callbackConfigured,
         hermesVision: hermesVision.configured,
         hermesMemberTools: wecomContact.toolsConfigured,
       },
@@ -168,14 +163,6 @@ const server = createServer(async (request, response) => {
         const status = Number(error?.statusCode || 500);
         return json(response, status, {
           error: status < 500 ? error.message : "企业微信回调暂时不可用",
-        });
-      });
-    }
-    if (url.pathname === "/api/wecom/kf/callback") {
-      return wecomCustomerCallback.handle(request, response, url).catch((error) => {
-        const status = Number(error?.statusCode || 500);
-        return json(response, status, {
-          error: status < 500 ? error.message : "微信客服回调暂时不可用",
         });
       });
     }
@@ -252,10 +239,17 @@ if (port === 8788) {
   });
   const initialCourseReminder = setTimeout(() => void runCourseReminders(), 30_000);
   const courseReminderTimer = setInterval(() => void runCourseReminders(), 120_000);
+  const retryCustomerMessages = () => wecomCustomerService.retryFailedMessages().catch((error) => {
+    console.error(JSON.stringify({ level: "error", message: "WeCom customer message retry failed", detail: String(error?.message || error).slice(0, 240) }));
+  });
+  const initialCustomerRetry = setTimeout(() => void retryCustomerMessages(), 45_000);
+  const customerRetryTimer = setInterval(() => void retryCustomerMessages(), 120_000);
   initialReconcile.unref();
   reconcileTimer.unref();
   initialCourseReminder.unref();
   courseReminderTimer.unref();
+  initialCustomerRetry.unref();
+  customerRetryTimer.unref();
 }
 
 async function initializeDatabase() {
@@ -355,9 +349,23 @@ async function initializeDatabase() {
       open_kfid TEXT NOT NULL,
       msg_type TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'processing',
+      payload_json JSONB NOT NULL DEFAULT '{}',
+      attempt_count INTEGER NOT NULL DEFAULT 0,
       result TEXT,
       error_message TEXT,
+      next_retry_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS wecom_customer_sync_state (
+      open_kfid TEXT PRIMARY KEY,
+      cursor TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS wecom_customer_conversations (
+      external_userid TEXT PRIMARY KEY,
+      member_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      turns_json JSONB NOT NULL DEFAULT '[]',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS wecom_coach_conversations (
@@ -388,6 +396,9 @@ async function initializeDatabase() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE wecom_coach_conversations ADD COLUMN IF NOT EXISTS pending_json JSONB;
+    ALTER TABLE wecom_customer_messages ADD COLUMN IF NOT EXISTS payload_json JSONB NOT NULL DEFAULT '{}';
+    ALTER TABLE wecom_customer_messages ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE wecom_customer_messages ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS audit_log_actor_date_idx ON audit_log(actor_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS notifications_status_date_idx ON notifications(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS member_wecom_bindings_coach_idx ON member_wecom_bindings(coach_userid, status);
@@ -399,6 +410,8 @@ async function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS wecom_binding_links_member_status_idx ON wecom_binding_links(member_id, coach_userid, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_callback_messages_coach_date_idx ON wecom_callback_messages(coach_userid, created_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_customer_messages_external_date_idx ON wecom_customer_messages(external_userid, created_at DESC);
+    CREATE INDEX IF NOT EXISTS wecom_customer_messages_retry_idx ON wecom_customer_messages(status, next_retry_at) WHERE next_retry_at IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS wecom_customer_conversations_member_idx ON wecom_customer_conversations(member_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_coach_conversations_updated_idx ON wecom_coach_conversations(updated_at DESC);
     CREATE INDEX IF NOT EXISTS hermes_runtime_incidents_fingerprint_idx ON hermes_runtime_incidents(fingerprint, updated_at DESC);
   `);
