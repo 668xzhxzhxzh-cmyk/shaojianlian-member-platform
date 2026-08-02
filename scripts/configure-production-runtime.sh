@@ -87,4 +87,14 @@ then
   exit 1
 fi
 
+if ! node "${base_dir}/current/scripts/verify-vision-runtime.mjs" \
+  "${env_file}" \
+  "${base_dir}/current/server/hermes-vision.mjs"
+then
+  cp --preserve=mode,ownership,timestamps "${backup_file}" "${env_file}"
+  systemctl restart shao-api
+  echo "VISION_CONFIG_ROLLED_BACK" >&2
+  exit 1
+fi
+
 echo "RUNTIME_CONFIG_OK"
