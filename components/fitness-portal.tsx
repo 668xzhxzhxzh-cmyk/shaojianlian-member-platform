@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import type { PortalView, Role } from "@/lib/portal-data";
 import { formatShanghaiDate } from "@/lib/portal-data";
+import { portalFetch } from "@/lib/portal-auth";
 import { AssistantView } from "./assistant-view";
 import { CoachWorkspace, type CoachSection } from "./coach-workspace";
 import {
@@ -72,8 +73,9 @@ const adminNav = [
 ] as const;
 
 export function FitnessPortal({ initialView }: { initialView: PortalView }) {
+  const initialRole: Role = initialView.startsWith("admin") ? "admin" : initialView.startsWith("coach") || initialView === "assistant" ? "coach" : "member";
   return (
-    <PortalProvider>
+    <PortalProvider role={initialRole}>
       <PortalShell initialView={initialView} />
     </PortalProvider>
   );
@@ -129,7 +131,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
   const unreadNotificationCount = notificationItems.filter((item) => !readNotificationIds.includes(item.id)).length;
 
   useEffect(() => {
-    fetch("/api/auth/me", { credentials: "include" })
+    portalFetch("/api/auth/me", initialRole)
       .then(async (response) => {
         if (response.status === 401) {
           setAuthStatus("unauthorized");
@@ -175,7 +177,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
         }
       })
       .catch(() => setAuthStatus("demo"));
-  }, [refresh]);
+  }, [initialRole, refresh]);
 
   useEffect(() => {
     function handlePopState() {
@@ -241,7 +243,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
 
   async function logout() {
     try {
-      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+      await portalFetch("/api/auth/logout", role, { method: "POST" });
     } finally {
       setProfileOpen(false);
       setAuthorizedRole(null);
@@ -391,9 +393,8 @@ function LoginScreen({ requestedRole, onSuccess }: { requestedRole: Role; onSucc
     setBusy(true);
     const data = new FormData(event.currentTarget);
     try {
-      const response = await fetch(registering ? "/api/auth/register" : "/api/auth/login", {
+      const response = await portalFetch(registering ? "/api/auth/register" : "/api/auth/login", requestedRole, {
         method: "POST",
-        credentials: "include",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(registering ? {
           name: data.get("name"),

@@ -30,6 +30,7 @@ mcp_servers:
         - create_member_binding_qr
         - bind_member_external_userid
         - create_member_message_draft
+        - create_member_message
         - confirm_customer_send_task
         - get_customer_send_task_status
 

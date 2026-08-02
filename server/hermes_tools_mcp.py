@@ -345,6 +345,32 @@ def create_member_message_draft(
 
 
 @mcp.tool()
+def create_member_message(
+    member_id: str,
+    kind: str,
+    title: str,
+    content: str,
+) -> dict[str, Any]:
+    """创建经过服务端策略校验的会员客户消息。
+
+    kind 仅可用于已确定事实的日常提醒：course_reminder、
+    booking_confirmation、checkin_reminder、hydration_reminder、
+    meal_log_reminder、membership_expiry_reminder。
+    这些消息无需教练在聊天中二次审批，会直接创建企业微信发送任务，
+    但仍须教练在企业微信客户端确认。涉及训练、饮食、伤痛、费用、
+    取消或改期等判断时，服务端会强制降级为待教练确认草稿。
+    """
+
+    return _call(
+        "create_customer_message",
+        member_id=member_id,
+        kind=kind,
+        title=title,
+        content=content,
+    )
+
+
+@mcp.tool()
 def confirm_customer_send_task(
     task_id: str,
     confirmation: str,

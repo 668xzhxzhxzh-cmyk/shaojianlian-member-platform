@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { classifyCustomerMessage } from "./message-policy.mjs";
 
 const WECOM_API_ORIGIN = "https://qyapi.weixin.qq.com";
 const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -99,6 +100,17 @@ export function createWecomContactService({ pool }) {
         task,
         instruction: "草稿已创建。若内容无误，请直接回复：确认发送。系统会在后台安全关联本次任务。",
       });
+    }
+    if (operation === "create_customer_message") {
+      const delivery = await createCustomerMessage({
+        memberId: body.member_id,
+        coachUserId,
+        kind: body.kind,
+        title: body.title,
+        content: body.content,
+        sourceKey: body.source_key,
+      });
+      return sendJson(response, 201, delivery);
     }
     if (operation === "confirm_customer_send_task") {
       if (String(body.confirmation || "").trim() !== "确认发送") {
@@ -671,7 +683,16 @@ export function createWecomContactService({ pool }) {
     return officialName;
   }
 
-  async function createMessageDraft({ memberId: rawMemberId, coachUserId, title, content }) {
+  async function createMessageDraft({
+    memberId: rawMemberId,
+    coachUserId,
+    title,
+    content,
+    kind = "coach_decision",
+    approvalMode = "coach_required",
+    sourceKey = "",
+    scheduledFor = null,
+  }) {
     const memberId = normalizeId(rawMemberId, "member_id");
     const safeTitle = normalizeText(title, "标题", 80);
     const safeContent = normalizeText(content, "消息内容", 1800);
@@ -689,12 +710,23 @@ export function createWecomContactService({ pool }) {
       throw publicError(409, "会员尚未绑定 external_userid，不能创建发送草稿");
     }
     const taskId = randomUUID();
-    await pool.query(
+    const normalizedSourceKey = String(sourceKey || "").trim().slice(0, 240) || null;
+    const inserted = await pool.query(
       `INSERT INTO wecom_send_tasks
-         (id,member_id,external_userid,coach_userid,title,content,status)
-       VALUES ($1,$2,$3,$4,$5,$6,'draft')`,
-      [taskId, memberId, row.external_userid, coachUserId, safeTitle, safeContent],
+         (id,member_id,external_userid,coach_userid,title,content,status,message_kind,approval_mode,source_key,scheduled_for)
+       VALUES ($1,$2,$3,$4,$5,$6,'draft',$7,$8,$9,$10)
+       ON CONFLICT (source_key) WHERE source_key IS NOT NULL DO NOTHING
+       RETURNING id`,
+      [taskId, memberId, row.external_userid, coachUserId, safeTitle, safeContent, kind, approvalMode, normalizedSourceKey, scheduledFor],
     );
+    if (!inserted.rows[0] && normalizedSourceKey) {
+      const existing = await pool.query(
+        `SELECT id,member_id,title,content,status,provider_message,next_retry_at
+         FROM wecom_send_tasks WHERE source_key=$1 LIMIT 1`,
+        [normalizedSourceKey],
+      );
+      if (existing.rows[0]) return { ...publicTask(existing.rows[0]), title: existing.rows[0].title, content: existing.rows[0].content, idempotent_replay: true };
+    }
     await auditOperation(coachUserId, "wecom_message_draft_created", {
       task_id: taskId,
       member_id: memberId,
@@ -706,7 +738,66 @@ export function createWecomContactService({ pool }) {
       title: safeTitle,
       content: safeContent,
       status: "draft",
+      message_kind: kind,
+      approval_mode: approvalMode,
       member_received: false,
+    };
+  }
+
+  async function createCustomerMessage({ memberId, coachUserId, kind, title, content, sourceKey = "", scheduledFor = null }) {
+    const policy = classifyCustomerMessage({ kind, title, content });
+    const task = await createMessageDraft({
+      memberId,
+      coachUserId,
+      title,
+      content,
+      kind: policy.kind,
+      approvalMode: policy.approvalMode,
+      sourceKey,
+      scheduledFor,
+    });
+    if (task.idempotent_replay) {
+      return { task, policy, instruction: "相同消息任务已存在，未重复创建。" };
+    }
+    if (policy.approvalMode === "coach_required") {
+      return {
+        task,
+        policy,
+        instruction: "该消息涉及教练判断，已保存为草稿；请确认内容后再发送。",
+      };
+    }
+
+    const occupied = await pool.query(
+      `SELECT id,status
+       FROM wecom_send_tasks
+       WHERE external_userid=(SELECT external_userid FROM wecom_send_tasks WHERE id=$1)
+         AND id<>$1
+         AND created_at >= $2
+         AND status IN ('creating_task','awaiting_coach_confirmation','wecom_reported_sent','failed_frequency_limit','frequency_deferred')
+       ORDER BY created_at DESC LIMIT 1`,
+      [task.task_id, chinaDayStart()],
+    );
+    if (occupied.rows[0]) {
+      await pool.query(
+        `UPDATE wecom_send_tasks
+         SET status='frequency_deferred',provider_message='今日已有客户触达任务，已在调用企业微信前拦截',provider_updated_at=NOW(),next_retry_at=$2
+         WHERE id=$1`,
+        [task.task_id, scheduledFor ? null : nextChinaMorning()],
+      );
+      return {
+        task: { ...task, status: "frequency_deferred", provider_message: "今日已有客户触达任务，未重复调用企业微信", next_retry_at: scheduledFor ? null : nextChinaMorning() },
+        policy,
+        instruction: scheduledFor
+          ? "日常提醒触发频控保护，请教练从客户会话手动提醒。"
+          : "日常消息已排入下一可发送窗口。",
+      };
+    }
+
+    const confirmed = await confirmCustomerSendTask(task.task_id, coachUserId);
+    return {
+      task: confirmed,
+      policy,
+      instruction: "日常消息无需聊天内二次审批。发送任务已创建，请在企业微信客户端确认发送。",
     };
   }
 
@@ -796,7 +887,7 @@ export function createWecomContactService({ pool }) {
     requireContactConfigured();
     const taskId = normalizeUuid(rawTaskId, "task_id");
     const result = await pool.query(
-      `SELECT id,member_id,external_userid,coach_userid,status,wecom_msgid,provider_message,next_retry_at,delivered_at
+      `SELECT id,member_id,external_userid,coach_userid,status,wecom_msgid,provider_message,next_retry_at,delivered_at,scheduled_for
        FROM wecom_send_tasks WHERE id=$1 AND coach_userid=$2 LIMIT 1`,
       [taskId, coachUserId],
     );
@@ -831,7 +922,11 @@ export function createWecomContactService({ pool }) {
         : providerStatus === 3
           ? "客户已收到其他群发消息，发送失败"
           : "等待企业微信客户端确认";
-    const nextRetryAt = providerStatus === 3 ? nextChinaMorning() : null;
+    const nextWindow = nextChinaMorning();
+    const nextRetryAt = providerStatus === 3
+      && (!task.scheduled_for || new Date(task.scheduled_for).getTime() > nextWindow.getTime())
+      ? nextWindow
+      : null;
     await pool.query(
       `UPDATE wecom_send_tasks
        SET status=$2,
@@ -877,7 +972,9 @@ export function createWecomContactService({ pool }) {
         if (current.status === "wecom_reported_sent") {
           await notifyCoach(task.coach_userid, "会员消息已由企业微信报告发送成功；系统不会把“已发送”误写成“已读”。");
         } else if (current.status === "failed_frequency_limit") {
-          await notifyCoach(task.coach_userid, "本次会员提醒被企业微信接收频率限制拦截，会员未收到。系统已安排到下一可发送窗口自动重建任务，到时请在企业微信客户端再次确认发送。");
+          await notifyCoach(task.coach_userid, current.next_retry_at
+            ? "本次会员提醒被企业微信接收频率限制拦截，会员未收到。系统已安排到下一可发送窗口自动重建任务。"
+            : "本次课程提醒被企业微信接收频率限制拦截，会员未收到，且下个窗口已晚于课程时间。请从客户会话手动提醒。");
         } else if (current.status === "failed_not_friend") {
           await notifyCoach(task.coach_userid, "本次会员提醒发送失败：客户已不是当前教练的企业微信好友。请先恢复客户联系后再发送。");
         }
@@ -889,12 +986,13 @@ export function createWecomContactService({ pool }) {
     }
 
     const due = await pool.query(
-      `SELECT t.id,t.member_id,t.external_userid,t.coach_userid,t.title,t.content,u.name AS member_name
+      `SELECT t.id,t.member_id,t.external_userid,t.coach_userid,t.title,t.content,t.message_kind,t.approval_mode,t.scheduled_for,u.name AS member_name
        FROM wecom_send_tasks t
        JOIN users u ON u.id=t.member_id
-       WHERE t.status='failed_frequency_limit'
+       WHERE t.status IN ('failed_frequency_limit','frequency_deferred')
          AND t.next_retry_at IS NOT NULL
          AND t.next_retry_at <= NOW()
+         AND (t.scheduled_for IS NULL OR t.scheduled_for > NOW())
          AND NOT EXISTS (SELECT 1 FROM wecom_send_tasks child WHERE child.retry_of=t.id)
        ORDER BY t.next_retry_at
        LIMIT 50`,
@@ -905,11 +1003,11 @@ export function createWecomContactService({ pool }) {
       try {
         const inserted = await pool.query(
           `INSERT INTO wecom_send_tasks
-             (id,member_id,external_userid,coach_userid,title,content,status,retry_of)
-           VALUES ($1,$2,$3,$4,$5,$6,'draft',$7)
+             (id,member_id,external_userid,coach_userid,title,content,status,retry_of,message_kind,approval_mode,scheduled_for)
+           VALUES ($1,$2,$3,$4,$5,$6,'draft',$7,$8,$9,$10)
            ON CONFLICT DO NOTHING
            RETURNING id`,
-          [retryId, original.member_id, original.external_userid, original.coach_userid, original.title, original.content, original.id],
+          [retryId, original.member_id, original.external_userid, original.coach_userid, original.title, original.content, original.id, original.message_kind, original.approval_mode, original.scheduled_for],
         );
         if (!inserted.rows[0]) continue;
         await confirmCustomerSendTask(retryId, original.coach_userid);
@@ -998,6 +1096,7 @@ export function createWecomContactService({ pool }) {
     executeCoachOperation,
     handleContactEvent,
     handleInternalTool,
+    createCustomerMessage,
     reconcileSendTasks,
   };
 }
@@ -1012,6 +1111,17 @@ export function nextChinaMorning(now = new Date()) {
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   const midnightUtc = Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), 16, 0, 0, 0);
   return new Date(midnightUtc + 9 * 60 * 60 * 1000);
+}
+
+export function chinaDayStart(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), -8, 0, 0, 0));
 }
 
 function normalizeId(value, label, maxLength = 80) {

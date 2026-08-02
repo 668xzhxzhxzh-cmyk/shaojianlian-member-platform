@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { nextChinaMorning } from "../server/wecom-contact.mjs";
+import { chinaDayStart, nextChinaMorning } from "../server/wecom-contact.mjs";
 
 test("frequency limited messages retry at the next 09:00 China window", () => {
   const retryAt = nextChinaMorning(new Date("2026-08-02T07:10:00.000Z"));
   assert.equal(retryAt.toISOString(), "2026-08-03T01:00:00.000Z");
+});
+
+test("frequency preflight uses the current China calendar day", () => {
+  assert.equal(chinaDayStart(new Date("2026-08-03T04:00:00.000Z")).toISOString(), "2026-08-02T16:00:00.000Z");
 });
 
 test("delivery reconciliation never equates task creation or sending with member read", async () => {

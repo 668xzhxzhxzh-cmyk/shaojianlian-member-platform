@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { memberRows } from "@/lib/portal-data";
+import { portalFetch } from "@/lib/portal-auth";
 import { redactConversationText } from "@/lib/public-conversation-text.mjs";
 import { usePortal } from "./portal-context";
 import { Avatar, Card, SectionTitle, TrendChart } from "./ui";
@@ -44,7 +45,7 @@ export function AssistantView({
   selectedMemberId?: string;
   onSelectMember?: (memberId: string) => void;
 }) {
-  const { state, notify, updateSuggestion, refresh } = usePortal();
+  const { state, role, notify, updateSuggestion, refresh } = usePortal();
   const [localMemberId, setLocalMemberId] = useState(selectedMemberId ?? state.profile.id);
   const [memberOptions, setMemberOptions] = useState(memberRows);
   const activeMemberId = selectedMemberId ?? localMemberId;
@@ -69,7 +70,7 @@ export function AssistantView({
   const suggestion = state.suggestions[0];
 
   useEffect(() => {
-    fetch("/api/users", { credentials: "include" })
+    portalFetch("/api/users", role)
       .then(async (response) => {
         if (!response.ok) return;
         const result = await response.json() as { users?: Array<{ id: string; name: string; phone: string; role: string; status: string }> };
@@ -83,17 +84,17 @@ export function AssistantView({
         })));
       })
       .catch(() => undefined);
-  }, []);
+  }, [role]);
 
   useEffect(() => {
-    fetch("/api/hermes/evolution", { credentials: "include" })
+    portalFetch("/api/hermes/evolution", role)
       .then(async (response) => {
         if (!response.ok) return;
         const result = await response.json() as { review?: EvolutionReview | null };
         if (result.review) setEvolutionReview(result.review);
       })
       .catch(() => undefined);
-  }, []);
+  }, [role]);
 
   const chartData = useMemo(
     () => state.bodyMetrics.slice(-7).map((item, index) => ({ ...item, load: [1820, 1940, 1600, 2250, 1760, 2140, 1680][index] })),
@@ -113,7 +114,7 @@ export function AssistantView({
     const timeout = window.setTimeout(() => controller.abort(), 125_000);
     setMessages((items) => [...items, { role: "assistant", content: "", time: now() }]);
     try {
-      const response = await fetch("/api/agent/chat", {
+      const response = await portalFetch("/api/agent/chat", role, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

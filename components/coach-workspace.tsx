@@ -37,6 +37,7 @@ import {
   type PortalState,
   type TrainingPlan,
 } from "@/lib/portal-data";
+import { portalFetch } from "@/lib/portal-auth";
 import { usePortal } from "./portal-context";
 import { Avatar, Card, ProgressBar, SectionTitle, StatCard, TrendChart } from "./ui";
 
@@ -75,6 +76,7 @@ export function CoachWorkspace({
 }: CoachWorkspaceProps) {
   const {
     state,
+    role,
     addCoachBooking,
     deleteCoachBooking,
     saveTrainingPlan,
@@ -94,7 +96,7 @@ export function CoachWorkspace({
   };
 
   useEffect(() => {
-    fetch("/api/users", { credentials: "include" })
+    portalFetch("/api/users", role)
       .then(async (response) => {
         if (!response.ok) return;
         const result = await response.json() as { users?: Array<{ id: string; name: string; phone: string; role: string; status: string }> };
@@ -108,7 +110,7 @@ export function CoachWorkspace({
         })));
       })
       .catch(() => undefined);
-  }, []);
+  }, [role]);
 
   return (
     <div className="view-stack coach-workspace">

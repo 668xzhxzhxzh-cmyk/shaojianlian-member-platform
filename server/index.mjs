@@ -8,12 +8,19 @@ import { createWecomCallbackService } from "./wecom-callback.mjs";
 import { createWecomAppService } from "./wecom-app.mjs";
 import { createHermesCommandRouter } from "./hermes-command-router.mjs";
 import { createHermesEvolutionService, scheduleHermesEvolution } from "./hermes-evolution.mjs";
+import { createCourseReminderService } from "./course-reminders.mjs";
 import { compactWecomHermesReply, resolveWecomMemberContext } from "./wecom-agent.mjs";
 import {
   createWecomConversationStore,
   isContextualFollowUp,
   isCourseReference,
 } from "./wecom-conversation.mjs";
+import {
+  clearSessionCookies,
+  requestedSessionRole,
+  sessionCookie,
+  sessionTokenForRole,
+} from "./session-cookies.mjs";
 
 const { Pool } = pg;
 const port = Number(process.env.API_PORT || 8788);
@@ -86,12 +93,17 @@ const seedState = {
 
 const hermesPrompt = `你是邵教练的 Hermes 会员管理管家，具备 shao-coach MCP 工具。只使用系统已验证的精确 member_id；系统已给出时不得再次索要。参数齐全就调用最窄工具执行，参数不足只追问缺失项。
 
-企业微信回复只写结果或一个必要问题，不寒暄、不解释规则、不列能力，最多 3 个短句、120 个汉字。训练、饮食、身体反馈等修改执行后核验网站状态。删除课程和客户发送任务必须按系统规定确认；未取得真实发送状态不得说会员已收到。不要向教练展示 task_id、member_id、session_id、UUID 或其他内部编号。不要声称没有工具，先检查 MCP。不做医疗诊断。`;
+企业微信回复只写结果或一个必要问题，不寒暄、不解释规则、不列能力，最多 3 个短句、120 个汉字。训练、饮食、身体反馈等修改执行后核验网站状态。删除课程和涉及训练、饮食、伤痛、费用等教练决策的客户消息必须确认；课程提醒、预约确认、打卡、饮水、饮食记录和会员到期等已确定事实提醒可直接调用 create_member_message，不要求聊天内二次审批。企业微信客户联系任务仍需在客户端确认；未取得真实发送状态不得说会员已收到。不要向教练展示 task_id、member_id、session_id、UUID 或其他内部编号。不要声称没有工具，先检查 MCP。不做医疗诊断。`;
 
 await initializeDatabase();
 const wecomConversation = createWecomConversationStore({ pool });
 const wecomContact = createWecomContactService({ pool });
 const wecomApp = createWecomAppService();
+const courseReminders = createCourseReminderService({
+  pool,
+  queueRoutineMessage: (message) => wecomContact.createCustomerMessage(message),
+  notifyCoach: (coachUserId, content) => wecomApp.sendText({ toUserId: coachUserId, content }),
+});
 const hermesEvolution = createHermesEvolutionService({
   pool,
   modelReview: requestHermesDailyModelReview,
@@ -150,7 +162,9 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/auth/login" && request.method === "POST") return login(request, response);
     if (url.pathname === "/api/auth/register" && request.method === "POST") return register(request, response);
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
-      response.setHeader("set-cookie", `shao_session=; Path=/; HttpOnly; ${cookieSecure ? "Secure; " : ""}SameSite=Strict; Max-Age=0`);
+      const role = requestedSessionRole(request);
+      if (!role) return json(response, 400, { error: "退出入口无效" });
+      response.setHeader("set-cookie", clearSessionCookies(role, { secure: cookieSecure }));
       return json(response, 200, { ok: true });
     }
     const session = await readSession(request);
@@ -205,8 +219,15 @@ if (port === 8788) {
   };
   const initialReconcile = setTimeout(() => void reconcileWecomTasks(), 20_000);
   const reconcileTimer = setInterval(() => void reconcileWecomTasks(), 120_000);
+  const runCourseReminders = () => courseReminders.run().catch((error) => {
+    console.error(JSON.stringify({ level: "error", message: "Course reminder scan failed", detail: String(error?.message || error).slice(0, 240) }));
+  });
+  const initialCourseReminder = setTimeout(() => void runCourseReminders(), 30_000);
+  const courseReminderTimer = setInterval(() => void runCourseReminders(), 120_000);
   initialReconcile.unref();
   reconcileTimer.unref();
+  initialCourseReminder.unref();
+  courseReminderTimer.unref();
 }
 
 async function initializeDatabase() {
@@ -249,6 +270,10 @@ async function initializeDatabase() {
       retry_of UUID UNIQUE REFERENCES wecom_send_tasks(id) ON DELETE SET NULL,
       next_retry_at TIMESTAMPTZ,
       delivered_at TIMESTAMPTZ,
+      message_kind TEXT NOT NULL DEFAULT 'coach_decision',
+      approval_mode TEXT NOT NULL DEFAULT 'coach_required',
+      source_key TEXT UNIQUE,
+      scheduled_for TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       confirmed_at TIMESTAMPTZ,
       provider_updated_at TIMESTAMPTZ
@@ -256,6 +281,23 @@ async function initializeDatabase() {
     ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS retry_of UUID REFERENCES wecom_send_tasks(id) ON DELETE SET NULL;
     ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
     ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ;
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS message_kind TEXT NOT NULL DEFAULT 'coach_decision';
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS approval_mode TEXT NOT NULL DEFAULT 'coach_required';
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS source_key TEXT;
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMPTZ;
+    CREATE TABLE IF NOT EXISTS wecom_course_reminders (
+      id UUID PRIMARY KEY,
+      member_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      booking_id TEXT NOT NULL,
+      reminder_type TEXT NOT NULL,
+      course_start TIMESTAMPTZ NOT NULL,
+      send_task_id UUID REFERENCES wecom_send_tasks(id) ON DELETE SET NULL,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(member_id,booking_id,reminder_type,course_start)
+    );
     CREATE TABLE IF NOT EXISTS wecom_binding_links (
       state_token TEXT PRIMARY KEY,
       member_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -313,6 +355,8 @@ async function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS wecom_send_tasks_coach_status_idx ON wecom_send_tasks(coach_userid, status, created_at DESC);
     CREATE UNIQUE INDEX IF NOT EXISTS wecom_send_tasks_retry_of_unique_idx ON wecom_send_tasks(retry_of) WHERE retry_of IS NOT NULL;
     CREATE INDEX IF NOT EXISTS wecom_send_tasks_retry_due_idx ON wecom_send_tasks(status, next_retry_at) WHERE next_retry_at IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS wecom_send_tasks_source_key_unique_idx ON wecom_send_tasks(source_key) WHERE source_key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS wecom_course_reminders_status_start_idx ON wecom_course_reminders(status, course_start);
     CREATE INDEX IF NOT EXISTS wecom_binding_links_member_status_idx ON wecom_binding_links(member_id, coach_userid, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_callback_messages_coach_date_idx ON wecom_callback_messages(coach_userid, created_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_coach_conversations_updated_idx ON wecom_coach_conversations(updated_at DESC);
@@ -469,16 +513,18 @@ function createMemberState({ id, name, phone }) {
 async function issueSession(response, user, status = 200) {
   const token = await new SignJWT({ role: user.role, name: user.name })
     .setProtectedHeader({ alg: "HS256" }).setSubject(user.id).setIssuedAt().setExpirationTime("12h").sign(sessionSecret);
-  response.setHeader("set-cookie", `shao_session=${token}; Path=/; HttpOnly; ${cookieSecure ? "Secure; " : ""}SameSite=Strict; Max-Age=43200`);
+  response.setHeader("set-cookie", sessionCookie(user.role, token, { secure: cookieSecure }));
   return json(response, status, { user: { id: user.id, name: user.name, role: user.role } });
 }
 
 async function readSession(request) {
-  const cookies = Object.fromEntries(String(request.headers.cookie || "").split(";").map((part) => part.trim().split(/=(.*)/s).slice(0, 2)));
-  const token = cookies.shao_session;
+  const requestedRole = requestedSessionRole(request);
+  if (!requestedRole) return null;
+  const token = sessionTokenForRole(request.headers.cookie, requestedRole);
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, sessionSecret, { algorithms: ["HS256"] });
+    if (payload.role !== requestedRole) return null;
     return { id: payload.sub, role: payload.role, name: payload.name };
   } catch {
     return null;
