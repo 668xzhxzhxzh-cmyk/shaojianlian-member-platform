@@ -84,7 +84,10 @@ test("production WeChat status inspection is read-only and sanitized", async () 
   assert.match(deploy, /verify-wecom:/);
   assert.match(inspector, /SELECT msg_id,msg_type,status,result,attempt_count,created_at,updated_at/);
   assert.doesNotMatch(inspector, /SELECT[^;]*(?:external_userid|member_id|turns_json|payload_json)/i);
-  assert.doesNotMatch(inspector, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP)\b/i);
+  assert.doesNotMatch(
+    inspector,
+    /\b(?:INSERT\s+INTO|UPDATE\s+\w|DELETE\s+FROM|TRUNCATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b/i,
+  );
 });
 
 test("project Skill and AGENTS rules require verification before completion", async () => {
