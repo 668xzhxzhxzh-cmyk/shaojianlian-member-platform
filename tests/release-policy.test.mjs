@@ -62,6 +62,7 @@ test("release controller verifies, stages, health-checks and rolls back", async 
   assert.match(packageScript, /npm ci --prefix "\$stage\/release" --omit=dev/);
   assert.match(packageScript, /scripts\/backup-postgres\.sh/);
   assert.match(packageScript, /scripts\/hermes-desktop-watchdog\.sh/);
+  assert.match(packageScript, /cp -a "\$repo_root\/lib" "\$stage\/release\/lib"/);
   assert.match(packageScript, /运行包疑似包含真实密钥/);
   assert.match(webService, /\/opt\/shao-coach\/current\/web\/server\.js/);
   assert.match(apiService, /\/opt\/shao-coach\/current\/server\/index\.mjs/);

@@ -36,6 +36,7 @@ if [[ -d "$repo_root/public" ]]; then
 fi
 
 cp -a "$repo_root/server" "$stage/release/server"
+cp -a "$repo_root/lib" "$stage/release/lib"
 cp -a "$repo_root/deployment" "$stage/release/deployment"
 mkdir -p "$stage/release/scripts"
 cp "$repo_root/scripts/release-health-check.sh" "$stage/release/scripts/"
