@@ -51,6 +51,31 @@ test("WeCom rejects an explicit member_id outside the coach binding", async () =
   assert.match(result.error, /找不到 member_id=member-other/);
 });
 
+test("WeCom resolves a contextual follow-up from a recently verified member_id", async () => {
+  const result = await resolveWecomMemberContext({
+    pool: fakePool([{ id: "member-li", name: "🐻🐻君", status: "active", state_json: { bookings: [] } }]),
+    coachUserId: "coach-1",
+    content: "删除这节课",
+    trustedMemberId: "member-li",
+  });
+
+  assert.equal(result.memberId, "member-li");
+  assert.equal(result.member.id, "member-li");
+  assert.match(result.context, /最近 24 小时会话/);
+});
+
+test("WeCom safely resolves a contextual follow-up when the coach has one exact active binding", async () => {
+  const result = await resolveWecomMemberContext({
+    pool: fakePool([{ id: "member-li", name: "🐻🐻君", status: "active", state_json: { bookings: [] } }]),
+    coachUserId: "coach-1",
+    content: "删除这节课",
+    allowSoleBoundMember: true,
+  });
+
+  assert.equal(result.memberId, "member-li");
+  assert.match(result.context, /只有这一条有效会员绑定/);
+});
+
 test("WeCom Hermes replies are normalized and kept concise", () => {
   assert.equal(compactWecomHermesReply("收到。\n\n\n  已执行。  "), "收到。\n\n已执行。");
   const compact = compactWecomHermesReply("繁".repeat(WECOM_HERMES_REPLY_LIMIT + 50));
@@ -66,4 +91,6 @@ test("Hermes WeCom prompt executes complete additive changes without confirmatio
   assert.match(source, /当前完整指令本身就是执行授权/);
   assert.match(source, /绝不要再次要求教练确认会员或重发 member_id/);
   assert.match(source, /仅两类操作必须二次确认：删除课程，以及创建企业微信客户发送任务/);
+  assert.match(source, /下一条收到“确认删除”后直接使用系统上下文中的精确 member_id 和 session_id/);
+  assert.match(source, /\.\.\.conversation\.turns/);
 });

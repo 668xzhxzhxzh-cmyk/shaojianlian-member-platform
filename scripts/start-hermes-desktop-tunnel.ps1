@@ -2,9 +2,10 @@ $ErrorActionPreference = "Stop"
 
 $server = "120.26.121.247"
 $localPort = 9119
-$keyPath = Join-Path $env:USERPROFILE ".ssh\shao-hermes-desktop-v2"
+$keyPath = Join-Path $env:USERPROFILE ".ssh\hermes-desktop-tunnel"
 $tokenPath = Join-Path $env:LOCALAPPDATA "hermes\launcher\remote-token"
-$connectionUser = "hermesdesktop"
+$watchdogPath = Join-Path $env:LOCALAPPDATA "hermes\launcher\ensure-tunnel.ps1"
+$connectionUser = "hermes"
 
 if (-not (Test-Path -LiteralPath $keyPath)) {
   throw "找不到 Hermes Desktop 专用连接密钥：$keyPath"
@@ -17,20 +18,37 @@ if (-not $remoteToken) {
   throw "Hermes Desktop 远程会话令牌为空"
 }
 
-$existing = Get-NetTCPConnection -LocalPort $localPort -State Listen -ErrorAction SilentlyContinue
+$existing = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $localPort -State Listen -ErrorAction SilentlyContinue
+if (-not $existing -and (Test-Path -LiteralPath $watchdogPath)) {
+  $watchdog = Start-Process -FilePath "powershell.exe" -ArgumentList @(
+    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", $watchdogPath
+  ) -WindowStyle Hidden -Wait -PassThru
+  if ($watchdog.ExitCode -ne 0) {
+    throw "Hermes Desktop 安全隧道自动恢复失败，请查看本机 tunnel-watchdog.log"
+  }
+  $existing = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $localPort -State Listen -ErrorAction SilentlyContinue
+}
 if (-not $existing) {
-  Start-Process -FilePath "ssh.exe" -ArgumentList @(
-    "-N",
-    "-T",
-    "-i", $keyPath,
+  Start-Process -FilePath "$env:WINDIR\System32\OpenSSH\ssh.exe" -ArgumentList @(
+    "-N", "-T",
+    "-o", "BatchMode=yes",
     "-o", "ExitOnForwardFailure=yes",
+    "-o", "ConnectTimeout=15",
+    "-o", "ConnectionAttempts=3",
+    "-o", "ServerAliveInterval=15",
+    "-o", "ServerAliveCountMax=2",
+    "-o", "TCPKeepAlive=yes",
     "-o", "StrictHostKeyChecking=accept-new",
-    "-o", "ServerAliveInterval=30",
-    "-o", "ServerAliveCountMax=3",
-    "-L", "${localPort}:127.0.0.1:${localPort}",
+    "-i", $keyPath,
+    "-L", "127.0.0.1:${localPort}:127.0.0.1:${localPort}",
     "${connectionUser}@${server}"
-  ) -WindowStyle Hidden
-  Start-Sleep -Seconds 2
+  ) -WindowStyle Hidden | Out-Null
+  $deadline = (Get-Date).AddSeconds(30)
+  do {
+    Start-Sleep -Seconds 1
+    $existing = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $localPort -State Listen -ErrorAction SilentlyContinue
+  } while (-not $existing -and (Get-Date) -lt $deadline)
+  if (-not $existing) { throw "Hermes Desktop 安全隧道连接超时" }
 }
 
 $desktopCandidates = @(

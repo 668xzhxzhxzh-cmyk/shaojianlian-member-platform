@@ -7,6 +7,12 @@ import { createWecomContactService } from "./wecom-contact.mjs";
 import { createWecomCallbackService } from "./wecom-callback.mjs";
 import { createWecomAppService } from "./wecom-app.mjs";
 import { compactWecomHermesReply, resolveWecomMemberContext } from "./wecom-agent.mjs";
+import {
+  createWecomConversationStore,
+  isContextualFollowUp,
+  isCourseReference,
+  selectLatestCourseSessionId,
+} from "./wecom-conversation.mjs";
 
 const { Pool } = pg;
 const port = Number(process.env.API_PORT || 8788);
@@ -83,9 +89,10 @@ const hermesPrompt = `你是邵教练专属会员平台唯一的 Hermes 执行�
 
 新增课程、调整课程、训练方案、饮食方案、身体反馈和会员计划属于教练已授权的日常管理：所需参数齐全时立即调用最窄的 MCP 工具执行，不要先复述，不要再问“是否确认”。“添加/加一节/安排/排一节 + 日期时间 + 课程内容”必须按新增课程执行，不得误解为提醒会员、创建消息或待办；当前完整指令本身就是执行授权。调用 add_private_session 时把日期规范为 M/D、时间规范为 HH:MM–HH:MM，并使用由 member_id、日期和开始时间组成的稳定 request_id，执行后核验一次。成功只回复类似：已为🐻🐻君添加 8月4日 18:00–19:00 训练放松课，网站已同步。
 
-仅两类操作必须二次确认：删除课程，以及创建企业微信客户发送任务。删除前查询精确 session_id；客户消息先创建草稿并要求“确认发送 task_id=...”。未获得真实发送状态前不得说会员已收到。缺少日期、时间或课程内容时只追问缺失项。不要回答“没有这个工具”，应先检查可用 MCP 工具。不做医疗诊断。`;
+仅两类操作必须二次确认：删除课程，以及创建企业微信客户发送任务。教练说“删除这节课”且系统已提供最近课程的精确 session_id 时，只需简短回复“确认删除某会员某时段课程？请回复确认删除”；下一条收到“确认删除”后直接使用系统上下文中的精确 member_id 和 session_id 调用删除工具，不得再次索要这两个 id。客户消息先创建草稿并要求“确认发送 task_id=...”。未获得真实发送状态前不得说会员已收到。缺少日期、时间或课程内容时只追问缺失项。不要回答“没有这个工具”，应先检查可用 MCP 工具。不做医疗诊断。`;
 
 await initializeDatabase();
+const wecomConversation = createWecomConversationStore({ pool });
 const wecomContact = createWecomContactService({ pool });
 const wecomApp = createWecomAppService();
 const wecomCallback = createWecomCallbackService({
@@ -229,12 +236,20 @@ async function initializeDatabase() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS wecom_coach_conversations (
+      coach_userid TEXT PRIMARY KEY,
+      member_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      session_id TEXT,
+      turns_json JSONB NOT NULL DEFAULT '[]',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE INDEX IF NOT EXISTS audit_log_actor_date_idx ON audit_log(actor_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS notifications_status_date_idx ON notifications(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS member_wecom_bindings_coach_idx ON member_wecom_bindings(coach_userid, status);
     CREATE INDEX IF NOT EXISTS wecom_send_tasks_coach_status_idx ON wecom_send_tasks(coach_userid, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_binding_links_member_status_idx ON wecom_binding_links(member_id, coach_userid, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_callback_messages_coach_date_idx ON wecom_callback_messages(coach_userid, created_at DESC);
+    CREATE INDEX IF NOT EXISTS wecom_coach_conversations_updated_idx ON wecom_coach_conversations(updated_at DESC);
   `);
   const accounts = [
     ["member-li", process.env.MEMBER_PHONE || "13800005206", "李明", "member", process.env.MEMBER_PASSWORD || "Member@2026"],
@@ -631,11 +646,26 @@ async function handleWecomCoachMessage(message) {
   });
 
   try {
-    const reply = message.msgType === "text" && message.content
+    const result = message.msgType === "text" && message.content
       ? await requestHermesWecomReply(message)
-      : "目前仅支持文字指令。请发送包含精确 member_id 的文字任务。";
-    const compactReply = compactWecomHermesReply(reply);
+      : { reply: "目前仅支持文字指令。请发送文字任务。" };
+    const compactReply = compactWecomHermesReply(result.reply);
     await wecomApp.sendText({ toUserId: coachUserId, content: compactReply });
+    if (result.content) {
+      const sessionId = await resolveConversationSessionId({
+        memberId: result.memberId,
+        previousSessionId: result.previousSessionId,
+        content: result.content,
+        reply: compactReply,
+      });
+      await wecomConversation.saveTurn({
+        coachUserId,
+        memberId: result.memberId,
+        sessionId,
+        userContent: result.content,
+        assistantContent: compactReply,
+      });
+    }
     await pool.query(
       "UPDATE wecom_callback_messages SET status='replied',updated_at=NOW() WHERE dedupe_key=$1",
       [dedupeKey],
@@ -666,13 +696,26 @@ async function requestHermesWecomReply(message) {
   }
 
   const content = String(message.content || "").trim().slice(0, 4000);
+  const conversation = await wecomConversation.load(message.fromUserName);
+  const useConversationMember = isContextualFollowUp(content);
   const resolvedMember = await resolveWecomMemberContext({
     pool,
     coachUserId: message.fromUserName,
     content,
+    trustedMemberId: useConversationMember ? conversation.memberId : "",
+    allowSoleBoundMember: useConversationMember,
   });
-  if (resolvedMember.error) return resolvedMember.error;
+  if (resolvedMember.error) return {
+    reply: resolvedMember.error,
+    content,
+    previousSessionId: conversation.sessionId,
+  };
   const memberContext = resolvedMember.context;
+  const recentSessionId = conversation.sessionId
+    || (useConversationMember ? selectLatestCourseSessionId(resolvedMember.member?.state_json) : "");
+  const recentCourseContext = (isCourseReference(content) || /^确认删除\s*$/.test(content)) && recentSessionId
+    ? `最近对话或当前唯一有效绑定中已验证的课程 session_id=${recentSessionId}。遇到“这节课/确认删除”等指代时先用 get_member_by_id 核验该课程；存在时直接使用，不要再次索要 member_id 或 session_id。`
+    : "本条没有可引用的最近课程 session_id。";
 
   const upstream = await fetch(new URL("/v1/chat/completions", hermesApi), {
     method: "POST",
@@ -686,7 +729,8 @@ async function requestHermesWecomReply(message) {
       stream: true,
       messages: [
         { role: "system", content: hermesPrompt },
-        { role: "system", content: `当前请求来自已通过企业微信签名、AES 解密和 userid 白名单验证的自建应用教练 userid=${message.fromUserName}。${memberContext}` },
+        { role: "system", content: `当前请求来自已通过企业微信签名、AES 解密和 userid 白名单验证的自建应用教练 userid=${message.fromUserName}。${memberContext}${recentCourseContext}` },
+        ...conversation.turns,
         { role: "user", content },
       ],
     }),
@@ -696,7 +740,22 @@ async function requestHermesWecomReply(message) {
 
   const reply = await collectHermesReply(upstream.body);
   if (!reply.trim()) throw new Error("Hermes 未返回文字结果");
-  return reply.trim();
+  return {
+    reply: reply.trim(),
+    content,
+    memberId: resolvedMember.memberId,
+    previousSessionId: recentSessionId,
+  };
+}
+
+async function resolveConversationSessionId({ memberId, previousSessionId, content, reply }) {
+  if (!memberId || (!isCourseReference(content) && !isCourseReference(reply))) {
+    return previousSessionId || "";
+  }
+  const explicitSessionId = `${content}\n${reply}`.match(/\bsession_id\s*[=:：]\s*([A-Za-z0-9][A-Za-z0-9_-]{0,127})/i)?.[1];
+  if (explicitSessionId) return explicitSessionId;
+  const result = await pool.query("SELECT state_json FROM portal_state WHERE user_id=$1 LIMIT 1", [memberId]);
+  return selectLatestCourseSessionId(result.rows[0]?.state_json) || previousSessionId || "";
 }
 
 async function collectHermesReply(body) {
