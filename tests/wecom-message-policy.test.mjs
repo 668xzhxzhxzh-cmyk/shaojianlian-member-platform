@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWecomContactService } from "../server/wecom-contact.mjs";
 
-function messagePool() {
+function messagePool(quotaUsed = 0) {
   const tasks = new Map();
   const updates = [];
   const database = {
@@ -21,6 +21,7 @@ function messagePool() {
         return { rows: [{ id: params[0] }] };
       }
       if (text.includes("SELECT id,status") && text.includes("created_at")) return { rows: [] };
+      if (text.includes("SELECT COUNT(*)::int AS used")) return { rows: [{ used: quotaUsed }] };
       if (text.includes("UPDATE wecom_send_tasks")) {
         updates.push({ text, params });
         const task = tasks.get(params[0]);
@@ -93,5 +94,39 @@ test("routine messages auto-create a WeCom task while decision content stays dra
     delete process.env.WECOM_CORP_ID;
     delete process.env.WECOM_CONTACT_SECRET;
     delete process.env.WECOM_ALLOWED_COACH_USERIDS;
+    delete process.env.WECOM_GROUP_SEND_RULE;
+  }
+});
+
+test("monthly quota defers only after the calendar-month allowance is exhausted", async () => {
+  process.env.WECOM_CORP_ID = "ww-test";
+  process.env.WECOM_CONTACT_SECRET = "contact-secret";
+  process.env.WECOM_ALLOWED_COACH_USERIDS = "coach-1";
+  process.env.WECOM_GROUP_SEND_RULE = "monthly";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error("WeCom must not be called after the local monthly allowance is exhausted");
+  };
+
+  try {
+    const pool = messagePool(31);
+    const service = createWecomContactService({ pool });
+    const result = await service.createCustomerMessage({
+      memberId: "member-1",
+      coachUserId: "coach-1",
+      kind: "hydration_reminder",
+      title: "饮水提醒",
+      content: "请及时补充饮水。",
+    });
+
+    assert.equal(result.task.status, "frequency_deferred");
+    assert.match(result.task.provider_message, /本月 31 条/);
+    assert.match(result.instruction, /下一可发送窗口/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.WECOM_CORP_ID;
+    delete process.env.WECOM_CONTACT_SECRET;
+    delete process.env.WECOM_ALLOWED_COACH_USERIDS;
+    delete process.env.WECOM_GROUP_SEND_RULE;
   }
 });

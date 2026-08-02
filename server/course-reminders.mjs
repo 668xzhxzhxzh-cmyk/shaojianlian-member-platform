@@ -62,7 +62,7 @@ export function createCourseReminderService({ pool, queueRoutineMessage, notifyC
             if (status === "awaiting_coach_confirmation") {
               await notifyCoach(row.coach_userid, `“${row.name}”的课程提醒已自动创建，请在企业微信客户端确认发送。`);
             } else if (status === "frequency_deferred") {
-              await notifyCoach(row.coach_userid, `“${row.name}”今天已有客户触达任务，课程提醒已被频控保护。请从客户会话手动提醒，避免重复群发。`);
+              await notifyCoach(row.coach_userid, `“${row.name}”当前群发周期额度已用完，课程提醒已被频控保护。请从客户会话手动提醒。`);
             }
           } catch (error) {
             await pool.query(

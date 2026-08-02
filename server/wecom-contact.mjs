@@ -9,6 +9,7 @@ export function createWecomContactService({ pool }) {
   const corpId = String(process.env.WECOM_CORP_ID || "").trim();
   const contactSecret = String(process.env.WECOM_CONTACT_SECRET || process.env.WECOM_APP_SECRET || "").trim();
   const toolToken = String(process.env.HERMES_TOOL_TOKEN || "").trim();
+  const groupSendRule = normalizeWecomGroupSendRule(process.env.WECOM_GROUP_SEND_RULE);
   const allowedCoachUserIds = new Set(
     String(process.env.WECOM_ALLOWED_COACH_USERIDS || "")
       .split(",")
@@ -119,7 +120,9 @@ export function createWecomContactService({ pool }) {
       const task = await confirmCustomerSendTask(body.task_id, coachUserId);
       return sendJson(response, 200, {
         task,
-        message: "发送任务已创建，请在企业微信客户端确认发送。",
+        message: task.status === "frequency_deferred"
+          ? "当前企业微信群发周期额度已用完，任务未发送并已进入等待队列。"
+          : "发送任务已创建，请在企业微信客户端确认发送。",
       });
     }
     if (operation === "get_send_task_status") {
@@ -767,37 +770,15 @@ export function createWecomContactService({ pool }) {
       };
     }
 
-    const occupied = await pool.query(
-      `SELECT id,status
-       FROM wecom_send_tasks
-       WHERE external_userid=(SELECT external_userid FROM wecom_send_tasks WHERE id=$1)
-         AND id<>$1
-         AND created_at >= $2
-         AND status IN ('creating_task','awaiting_coach_confirmation','wecom_reported_sent','failed_frequency_limit','frequency_deferred')
-       ORDER BY created_at DESC LIMIT 1`,
-      [task.task_id, chinaDayStart()],
-    );
-    if (occupied.rows[0]) {
-      await pool.query(
-        `UPDATE wecom_send_tasks
-         SET status='frequency_deferred',provider_message='今日已有客户触达任务，已在调用企业微信前拦截',provider_updated_at=NOW(),next_retry_at=$2
-         WHERE id=$1`,
-        [task.task_id, scheduledFor ? null : nextChinaMorning()],
-      );
-      return {
-        task: { ...task, status: "frequency_deferred", provider_message: "今日已有客户触达任务，未重复调用企业微信", next_retry_at: scheduledFor ? null : nextChinaMorning() },
-        policy,
-        instruction: scheduledFor
-          ? "日常提醒触发频控保护，请教练从客户会话手动提醒。"
-          : "日常消息已排入下一可发送窗口。",
-      };
-    }
-
     const confirmed = await confirmCustomerSendTask(task.task_id, coachUserId);
     return {
       task: confirmed,
       policy,
-      instruction: "日常消息无需聊天内二次审批。发送任务已创建，请在企业微信客户端确认发送。",
+      instruction: confirmed.status === "frequency_deferred"
+        ? (confirmed.next_retry_at
+            ? "当前群发周期额度已用完，日常消息已排入下一可发送窗口。"
+            : "当前群发周期额度已用完，且下个窗口晚于课程时间，请教练从客户会话手动提醒。")
+        : "日常消息无需聊天内二次审批。发送任务已创建，请在企业微信客户端确认发送。",
     };
   }
 
@@ -806,10 +787,11 @@ export function createWecomContactService({ pool }) {
     const taskId = normalizeUuid(rawTaskId, "task_id");
     const client = await pool.connect();
     let task;
+    let deferredTask = null;
     try {
       await client.query("BEGIN");
       const result = await client.query(
-        `SELECT id,member_id,external_userid,coach_userid,title,content,status
+        `SELECT id,member_id,external_userid,coach_userid,title,content,status,scheduled_for
          FROM wecom_send_tasks
          WHERE id=$1 AND coach_userid=$2
          FOR UPDATE`,
@@ -820,10 +802,43 @@ export function createWecomContactService({ pool }) {
       if (task.status !== "draft") {
         throw publicError(409, "该草稿已处理，不能重复创建发送任务");
       }
-      await client.query(
-        "UPDATE wecom_send_tasks SET status='creating_task',confirmed_at=NOW() WHERE id=$1",
-        [taskId],
+      const quota = getWecomQuotaWindow(groupSendRule);
+      const quotaUsage = await client.query(
+        `SELECT COUNT(*)::int AS used
+         FROM wecom_send_tasks
+         WHERE external_userid=$1
+           AND id<>$2
+           AND created_at >= $3
+           AND created_at < $4
+           AND status IN ('creating_task','awaiting_coach_confirmation','wecom_reported_sent')`,
+        [task.external_userid, taskId, quota.windowStart, quota.windowEnd],
       );
+      const used = Number(quotaUsage.rows[0]?.used || 0);
+      if (used >= quota.limit) {
+        const nextRetryAt = !task.scheduled_for || new Date(task.scheduled_for).getTime() > quota.nextRetryAt.getTime()
+          ? quota.nextRetryAt
+          : null;
+        await client.query(
+          `UPDATE wecom_send_tasks
+           SET status='frequency_deferred',
+               provider_message=$2,provider_updated_at=NOW(),next_retry_at=$3
+           WHERE id=$1`,
+          [taskId, `${quota.label}的客户接收额度已用完，未调用企业微信`, nextRetryAt],
+        );
+        deferredTask = {
+          task_id: taskId,
+          member_id: task.member_id,
+          status: "frequency_deferred",
+          provider_message: `${quota.label}的客户接收额度已用完，未调用企业微信`,
+          next_retry_at: nextRetryAt,
+          member_received: false,
+        };
+      } else {
+        await client.query(
+          "UPDATE wecom_send_tasks SET status='creating_task',confirmed_at=NOW() WHERE id=$1",
+          [taskId],
+        );
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -831,6 +846,8 @@ export function createWecomContactService({ pool }) {
     } finally {
       client.release();
     }
+
+    if (deferredTask) return deferredTask;
 
     try {
       const result = await callWecom("/cgi-bin/externalcontact/add_msg_template", {
@@ -922,7 +939,7 @@ export function createWecomContactService({ pool }) {
         : providerStatus === 3
           ? "客户已收到其他群发消息，发送失败"
           : "等待企业微信客户端确认";
-    const nextWindow = nextChinaMorning();
+    const nextWindow = getWecomQuotaWindow(groupSendRule).nextRetryAt;
     const nextRetryAt = providerStatus === 3
       && (!task.scheduled_for || new Date(task.scheduled_for).getTime() > nextWindow.getTime())
       ? nextWindow
@@ -1010,9 +1027,11 @@ export function createWecomContactService({ pool }) {
           [retryId, original.member_id, original.external_userid, original.coach_userid, original.title, original.content, original.id, original.message_kind, original.approval_mode, original.scheduled_for],
         );
         if (!inserted.rows[0]) continue;
-        await confirmCustomerSendTask(retryId, original.coach_userid);
-        retries += 1;
-        await notifyCoach(original.coach_userid, `“${original.member_name}”的提醒已进入新的发送窗口。发送任务已创建，请在企业微信客户端确认发送。`);
+        const confirmed = await confirmCustomerSendTask(retryId, original.coach_userid);
+        if (confirmed.status === "awaiting_coach_confirmation") {
+          retries += 1;
+          await notifyCoach(original.coach_userid, `“${original.member_name}”的提醒已进入新的发送窗口。发送任务已创建，请在企业微信客户端确认发送。`);
+        }
         await auditOperation(original.coach_userid, "wecom_frequency_retry_task_created", {
           task_id: retryId,
           member_id: original.member_id,
@@ -1122,6 +1141,62 @@ export function chinaDayStart(now = new Date()) {
   }).formatToParts(now);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), -8, 0, 0, 0));
+}
+
+export function normalizeWecomGroupSendRule(value) {
+  const normalized = String(value || "daily").trim().toLowerCase();
+  return new Set(["daily", "weekly", "monthly"]).has(normalized) ? normalized : "daily";
+}
+
+export function getWecomQuotaWindow(rule, now = new Date()) {
+  const normalizedRule = normalizeWecomGroupSendRule(rule);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const year = Number(values.year);
+  const monthIndex = Number(values.month) - 1;
+  const day = Number(values.day);
+  const chinaMidnightUtc = Date.UTC(year, monthIndex, day, -8, 0, 0, 0);
+
+  if (normalizedRule === "monthly") {
+    const limit = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+    return {
+      rule: normalizedRule,
+      limit,
+      windowStart: new Date(Date.UTC(year, monthIndex, 1, -8, 0, 0, 0)),
+      windowEnd: new Date(Date.UTC(year, monthIndex + 1, 1, -8, 0, 0, 0)),
+      nextRetryAt: new Date(Date.UTC(year, monthIndex + 1, 1, 1, 0, 0, 0)),
+      label: `本月 ${limit} 条`,
+    };
+  }
+
+  if (normalizedRule === "weekly") {
+    const weekday = new Date(Date.UTC(year, monthIndex, day)).getUTCDay();
+    const daysSinceMonday = (weekday + 6) % 7;
+    const windowStartMs = chinaMidnightUtc - daysSinceMonday * 24 * 60 * 60 * 1000;
+    return {
+      rule: normalizedRule,
+      limit: 7,
+      windowStart: new Date(windowStartMs),
+      windowEnd: new Date(windowStartMs + 7 * 24 * 60 * 60 * 1000),
+      nextRetryAt: new Date(windowStartMs + 7 * 24 * 60 * 60 * 1000 + 9 * 60 * 60 * 1000),
+      label: "本周 7 条",
+    };
+  }
+
+  return {
+    rule: normalizedRule,
+    limit: 1,
+    windowStart: new Date(chinaMidnightUtc),
+    windowEnd: new Date(chinaMidnightUtc + 24 * 60 * 60 * 1000),
+    nextRetryAt: nextChinaMorning(now),
+    label: "今日 1 条",
+  };
 }
 
 function normalizeId(value, label, maxLength = 80) {
