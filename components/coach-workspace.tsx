@@ -41,7 +41,7 @@ import { portalFetch } from "@/lib/portal-auth";
 import { usePortal } from "./portal-context";
 import { Avatar, Card, ProgressBar, SectionTitle, StatCard, TrendChart } from "./ui";
 
-export type CoachSection = "overview" | "members" | "schedule" | "training" | "nutrition" | "body";
+export type CoachSection = "overview" | "members" | "schedule" | "training" | "nutrition" | "body" | "conversations";
 type CoachMember = (typeof memberRows)[number];
 
 type CoachWorkspaceProps = {
@@ -93,6 +93,7 @@ export function CoachWorkspace({
     training: "训练方案",
     nutrition: "饮食方案",
     body: "身体反馈",
+    conversations: "客服记录",
   };
 
   useEffect(() => {
@@ -139,6 +140,7 @@ export function CoachWorkspace({
           {section === "training" ? <TrainingDesigner key={`${selectedMember.id}-${state.profile.id}-${state.trainingPlan?.updatedAt ?? "default"}`} member={selectedMember} plan={state.trainingPlan ?? defaultTrainingPlan} onSave={saveTrainingPlan} /> : null}
           {section === "nutrition" ? <NutritionDesigner key={`${selectedMember.id}-${state.profile.id}-${state.nutritionPlan?.updatedAt ?? "default"}`} member={selectedMember} plan={state.nutritionPlan ?? defaultNutritionPlan} onSave={saveNutritionPlan} /> : null}
           {section === "body" ? <BodyFeedback key={`${selectedMember.id}-${state.profile.id}-${state.bodyFeedbacks?.at(-1)?.id ?? "none"}`} member={selectedMember} data={state.bodyMetrics} feedbacks={state.bodyFeedbacks ?? []} onSave={saveBodyFeedback} /> : null}
+          {section === "conversations" ? <CustomerConversationArchive role={role} /> : null}
         </>
       )}
     </div>
@@ -375,6 +377,98 @@ function MemberManagement({
   );
 }
 
+type CustomerConversation = {
+  memberId: string;
+  memberName: string;
+  updatedAt: string;
+  turns: Array<{ role: "user" | "assistant"; content: string }>;
+};
+
+function CustomerConversationArchive({
+  role,
+}: {
+  role: "member" | "coach" | "admin";
+}) {
+  const [items, setItems] = useState<CustomerConversation[]>([]);
+  const [selectedMemberId, setSelectedMemberId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const selected = items.find((item) => item.memberId === selectedMemberId) ?? items[0];
+
+  useEffect(() => {
+    portalFetch("/api/customer-conversations", role)
+      .then(async (response) => {
+        if (!response.ok) return;
+        const result = await response.json() as { conversations?: CustomerConversation[] };
+        const conversations = result.conversations ?? [];
+        setItems(conversations);
+        setSelectedMemberId((current) => current || conversations[0]?.memberId || "");
+      })
+      .catch(() => undefined)
+      .finally(() => setLoading(false));
+  }, [role]);
+
+  return (
+    <Card className="customer-conversation-card">
+      <SectionTitle title="AI 客服沟通记录" action={<span className="auto-sync-note"><Check size={15} /> 仅显示本人名下会员</span>} />
+      <div className="customer-conversation-layout">
+        <aside className="customer-conversation-list" aria-label="会员客服会话">
+          {items.map((item) => <button key={item.memberId} className={selected?.memberId === item.memberId ? "active" : ""} onClick={() => setSelectedMemberId(item.memberId)}><Avatar name={item.memberName} size="sm" /><span><b>{item.memberName}</b><small>{formatArchiveTime(item.updatedAt)} · {item.turns.length} 条消息</small></span><ChevronRight size={16} /></button>)}
+          {!loading && !items.length ? <p>暂无会员客服沟通记录</p> : null}
+          {loading ? <p>正在读取客服记录…</p> : null}
+        </aside>
+        <section className="customer-conversation-thread" aria-live="polite">
+          {selected ? <><header><Avatar name={selected.memberName} /><span><b>{selected.memberName}</b><small>普通微信 · AI 健康管理服务</small></span></header><div>{selected.turns.map((turn, index) => <article className={turn.role} key={`${turn.role}-${index}`}><span>{turn.role === "user" ? selected.memberName : "AI 客服"}</span><p>{turn.content.startsWith("[图片]") ? `会员图片摘要：${turn.content.slice(4).trim()}` : turn.content}</p></article>)}</div></> : <div className="customer-conversation-empty"><MessageCircleMore size={28} /><b>选择一位会员查看沟通记录</b><span>这里显示普通微信客服与 Hermes 的真实对话。</span></div>}
+        </section>
+      </div>
+    </Card>
+  );
+}
+
+function formatArchiveTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "最近";
+  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" }).format(date);
+}
+
+function toDateInput(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function formatShortDate(date: Date) {
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function bookingDateKey(booking: Booking) {
+  const parts = String(booking.date || "").split(/[\/-]/).map(Number);
+  if (parts.length === 3) return `${parts[0]}-${String(parts[1]).padStart(2, "0")}-${String(parts[2]).padStart(2, "0")}`;
+  if (parts.length === 2) return `${new Date().getFullYear()}-${String(parts[0]).padStart(2, "0")}-${String(parts[1]).padStart(2, "0")}`;
+  return "";
+}
+
+function getWeekDays(anchor: Date) {
+  const monday = new Date(anchor);
+  const day = monday.getDay() || 7;
+  monday.setHours(12, 0, 0, 0);
+  monday.setDate(monday.getDate() - day + 1);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + index);
+    return date;
+  });
+}
+
+function getMonthDays(anchor: Date) {
+  const year = anchor.getFullYear();
+  const month = anchor.getMonth();
+  const first = new Date(year, month, 1, 12);
+  const leading = (first.getDay() + 6) % 7;
+  const count = new Date(year, month + 1, 0).getDate();
+  return [
+    ...Array.from({ length: leading }, () => null),
+    ...Array.from({ length: count }, (_, index) => new Date(year, month, index + 1, 12)),
+  ];
+}
+
 function CoachSchedule({
   member,
   bookings,
@@ -388,9 +482,28 @@ function CoachSchedule({
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState<Booking | null>(null);
+  const [calendarView, setCalendarView] = useState<"list" | "week" | "month">("week");
+  const [calendarAnchor, setCalendarAnchor] = useState(() => new Date());
+  const [addDate, setAddDate] = useState(() => toDateInput(new Date()));
   const activeBookings = bookings.filter((booking) => booking.status !== "已取消");
   const completed = activeBookings.filter((booking) => booking.status === "已完成").length;
   const pending = activeBookings.filter((booking) => booking.status === "待确认").length;
+  const weekDays = getWeekDays(calendarAnchor);
+  const monthDays = getMonthDays(calendarAnchor);
+
+  function openAdd(date = new Date()) {
+    setAddDate(toDateInput(date));
+    setAddOpen(true);
+  }
+
+  function moveCalendar(direction: -1 | 1) {
+    setCalendarAnchor((current) => {
+      const next = new Date(current);
+      if (calendarView === "month") next.setMonth(next.getMonth() + direction);
+      else next.setDate(next.getDate() + direction * 7);
+      return next;
+    });
+  }
 
   function addSession(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -423,8 +536,9 @@ function CoachSchedule({
         <StatCard icon={AlertTriangle} label="待确认" value={pending} suffix="节" note="需要教练处理" accent="slate" />
       </div>
       <Card className="coach-schedule-card">
-        <SectionTitle title={`${member.name} · 一对一私教排期`} action={<button className="button button-primary button-small" onClick={() => setAddOpen(true)}><Plus size={16} /> 新增课程</button>} />
-        <div className="coach-session-list">
+        <SectionTitle title={`${member.name} · 一对一私教排期`} action={<div className="schedule-header-actions"><div className="schedule-range-switch" aria-label="排期视图">{(["list", "week", "month"] as const).map((item) => <button key={item} className={calendarView === item ? "active" : ""} onClick={() => setCalendarView(item)}>{item === "list" ? "列表" : item === "week" ? "周" : "月"}</button>)}</div><button className="button button-primary button-small" onClick={() => openAdd()}><Plus size={16} /> 新增课程</button></div>} />
+        {calendarView !== "list" ? <div className="calendar-toolbar"><button className="icon-button" onClick={() => moveCalendar(-1)} aria-label="上一周期">‹</button><b>{calendarView === "week" ? `${formatShortDate(weekDays[0])} - ${formatShortDate(weekDays[6])}` : `${calendarAnchor.getFullYear()} 年 ${calendarAnchor.getMonth() + 1} 月`}</b><button className="icon-button" onClick={() => moveCalendar(1)} aria-label="下一周期">›</button></div> : null}
+        {calendarView === "list" ? <div className="coach-session-list">
           {activeBookings.length ? activeBookings.map((booking) => (
             <article key={booking.id}>
               <button className="coach-session-main" onClick={() => setSelectedSession(booking)}>
@@ -436,9 +550,11 @@ function CoachSchedule({
               <button className="icon-button danger-icon" onClick={() => setSelectedSession(booking)} aria-label={`删除 ${booking.date} ${booking.time} 课程`}><Trash2 size={17} /></button>
             </article>
           )) : (
-            <button className="empty-schedule-action" onClick={() => setAddOpen(true)}><Plus size={22} /><b>还没有课程排期</b><span>点击为 {member.name} 安排第一节一对一私教</span></button>
+            <button className="empty-schedule-action" onClick={() => openAdd()}><Plus size={22} /><b>还没有课程排期</b><span>点击为 {member.name} 安排第一节一对一私教</span></button>
           )}
-        </div>
+        </div> : null}
+        {calendarView === "week" ? <div className="coach-calendar-scroll"><div className="coach-week-board">{weekDays.map((date) => { const sessions = activeBookings.filter((booking) => bookingDateKey(booking) === toDateInput(date)); return <section key={toDateInput(date)}><header><small>{["周日", "周一", "周二", "周三", "周四", "周五", "周六"][date.getDay()]}</small><b>{formatShortDate(date)}</b></header>{sessions.map((booking) => <button key={booking.id} onClick={() => setSelectedSession(booking)}><time>{booking.time}</time><b>{booking.focus || booking.title}</b><small>{booking.status}</small></button>)}<button className="open" onClick={() => openAdd(date)} aria-label={`${formatShortDate(date)} 新增课程`}><Plus size={16} /> 新增</button></section>; })}</div></div> : null}
+        {calendarView === "month" ? <div className="coach-calendar-scroll"><div className="coach-month-board"><header>{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>周{day}</span>)}</header><div>{monthDays.map((date, index) => date ? <section key={toDateInput(date)} className={toDateInput(date) === toDateInput(new Date()) ? "today" : ""}><button className="month-day-number" onClick={() => openAdd(date)} aria-label={`${formatShortDate(date)} 新增课程`}>{date.getDate()}</button>{activeBookings.filter((booking) => bookingDateKey(booking) === toDateInput(date)).slice(0, 3).map((booking) => <button className="month-session" key={booking.id} onClick={() => setSelectedSession(booking)}><b>{booking.time.split(/[–-]/)[0]}</b><span>{booking.focus || booking.title}</span></button>)}</section> : <span className="month-blank" key={`blank-${index}`} />)}</div></div></div> : null}
       </Card>
       {addOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setAddOpen(false)}>
@@ -446,7 +562,7 @@ function CoachSchedule({
             <button type="button" className="icon-button modal-close" onClick={() => setAddOpen(false)} aria-label="关闭"><X size={20} /></button>
             <span className="eyebrow">MEMBER ID · {member.id}</span>
             <h2>为 {member.name} 新增一对一私教</h2>
-            <label className="stacked-label">上课日期<input name="date" type="date" defaultValue="2026-07-31" required /></label>
+            <label className="stacked-label">上课日期<input name="date" type="date" defaultValue={addDate} required /></label>
             <label className="stacked-label">开始时间<input name="time" type="time" defaultValue="09:00" min="06:00" max="22:00" required /></label>
             <label className="stacked-label">训练重点<input name="focus" defaultValue={member.goal} required maxLength={80} /></label>
             <label className="stacked-label">课程状态<select name="status" defaultValue="已预约"><option>已预约</option><option>待确认</option><option>已完成</option></select></label>

@@ -1,3 +1,5 @@
+import { createCustomerFastReply } from "./customer-fast-reply.mjs";
+
 const WECOM_API_ORIGIN = "https://qyapi.weixin.qq.com";
 const TOKEN_ERROR_CODES = new Set([40014, 42001]);
 const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
@@ -17,6 +19,7 @@ export function createWecomCustomerService({
   let accessToken = "";
   let accessTokenExpiresAt = 0;
   let resolvedAccount = null;
+  const accountQueues = new Map();
   const configured = Boolean(
     corpId
     && secret
@@ -29,6 +32,11 @@ export function createWecomCustomerService({
   async function handleEvent(message) {
     if (!configured) throw publicError(503, "企业微信客服接口尚未配置");
     const eventOpenKfId = normalizeId(message.openKfId, "微信客服账号 ID");
+    return enqueueAccount(eventOpenKfId, () => syncEvent({ ...message, openKfId: eventOpenKfId }));
+  }
+
+  async function syncEvent(message) {
+    const eventOpenKfId = message.openKfId;
     const account = await resolveAccount(eventOpenKfId);
     const syncToken = normalizeToken(message.kfToken);
     let cursor = await loadCursor(account.openKfId);
@@ -39,7 +47,7 @@ export function createWecomCustomerService({
         method: "POST",
         body: { cursor, token: syncToken, limit: 1000, voice_format: 0, open_kfid: account.openKfId },
       });
-      const messages = Array.isArray(data.msg_list) ? data.msg_list : [];
+      const messages = orderCustomerMessages(Array.isArray(data.msg_list) ? data.msg_list : []);
       for (const item of messages) {
         if (String(item?.open_kfid || "") !== account.openKfId || Number(item?.origin) !== 3) continue;
         processed += 1;
@@ -67,7 +75,7 @@ export function createWecomCustomerService({
       ? await pool.query(
         `UPDATE wecom_customer_messages
          SET status='processing',attempt_count=attempt_count+1,error_message=NULL,updated_at=NOW()
-         WHERE msg_id=$1 AND status='failed' AND attempt_count < $2
+         WHERE msg_id=$1 AND status='failed' AND sent_at IS NULL AND attempt_count < $2
          RETURNING msg_id`,
         [msgId, MAX_RETRY_ATTEMPTS],
       )
@@ -114,7 +122,12 @@ export function createWecomCustomerService({
     }
 
     const history = await loadConversation(externalUserId, member.id);
-    const content = await replyService.reply({
+    const fastReply = imageDescription ? "" : createCustomerFastReply({
+      customerText,
+      memberName: member.name,
+      memberState: member.state_json,
+    });
+    const content = fastReply || await replyService.reply({
       externalUserId,
       memberName: member.name,
       memberState: member.state_json,
@@ -123,16 +136,20 @@ export function createWecomCustomerService({
       history,
     });
     await sendText({ openKfId, externalUserId, content });
+    await markReplied(msgId, "replied");
     await saveConversation(externalUserId, member.id, history, {
       role: "user",
       content: imageDescription ? `[图片] ${imageDescription}` : customerText,
-    }, { role: "assistant", content });
-    await markReplied(msgId, "replied");
-    await audit(externalUserId, "wecom_customer_hermes_replied", {
+    }, { role: "assistant", content }).catch((error) => safeAudit(externalUserId, "wecom_customer_context_failed", {
+      msgId,
+      error: sanitizeError(error),
+    }));
+    await safeAudit(externalUserId, "wecom_customer_hermes_replied", {
       memberId: member.id,
       msgType,
       msgId,
       replyLength: Array.from(content).length,
+      route: fastReply ? "deterministic" : "hermes",
     });
     return { replied: true, memberId: member.id };
   }
@@ -141,14 +158,16 @@ export function createWecomCustomerService({
     if (!configured) return { retried: 0 };
     const result = await pool.query(
       `SELECT payload_json FROM wecom_customer_messages
-       WHERE status='failed' AND attempt_count < $1 AND next_retry_at <= NOW()
+       WHERE status='failed' AND sent_at IS NULL AND attempt_count < $1 AND next_retry_at <= NOW()
        ORDER BY next_retry_at ASC LIMIT 20`,
       [MAX_RETRY_ATTEMPTS],
     );
     let retried = 0;
     for (const row of result.rows) {
       try {
-        const outcome = await processCustomerMessage(row.payload_json, { retry: true });
+        const payload = row.payload_json;
+        const accountId = normalizeId(payload?.open_kfid, "微信客服账号 ID");
+        const outcome = await enqueueAccount(accountId, () => processCustomerMessage(payload, { retry: true }));
         if (!outcome.duplicate) retried += 1;
       } catch (error) {
         await markFailed(row.payload_json?.msgid, error);
@@ -194,21 +213,39 @@ export function createWecomCustomerService({
       "SELECT turns_json FROM wecom_customer_conversations WHERE external_userid=$1 AND member_id=$2",
       [externalUserId, memberId],
     );
-    return Array.isArray(result.rows[0]?.turns_json) ? result.rows[0].turns_json.slice(-8) : [];
+    return Array.isArray(result.rows[0]?.turns_json) ? result.rows[0].turns_json.slice(-6) : [];
   }
 
   async function saveConversation(externalUserId, memberId, history, userTurn, assistantTurn) {
-    const turns = [...history, userTurn, assistantTurn].slice(-8).map((turn) => ({
+    const turns = [...history, userTurn, assistantTurn].slice(-6).map((turn) => ({
       role: turn.role === "assistant" ? "assistant" : "user",
-      content: String(turn.content || "").slice(0, 600),
+      content: String(turn.content || "").slice(0, 500),
     }));
     await pool.query(
       `INSERT INTO wecom_customer_conversations (external_userid,member_id,turns_json,updated_at)
        VALUES ($1,$2,$3,NOW())
        ON CONFLICT (external_userid) DO UPDATE
        SET member_id=EXCLUDED.member_id,turns_json=EXCLUDED.turns_json,updated_at=NOW()`,
-      [externalUserId, memberId, turns],
+      [externalUserId, memberId, JSON.stringify(turns)],
     );
+  }
+
+  function enqueueAccount(accountId, task) {
+    const previous = accountQueues.get(accountId) || Promise.resolve();
+    const run = previous.catch(() => {}).then(task);
+    const tracked = run.finally(() => {
+      if (accountQueues.get(accountId) === tracked) accountQueues.delete(accountId);
+    });
+    accountQueues.set(accountId, tracked);
+    return tracked;
+  }
+
+  async function safeAudit(actorId, action, detail) {
+    try {
+      await audit(actorId, action, detail);
+    } catch {
+      // Delivery truth is already persisted; audit failure must never resend a customer reply.
+    }
   }
 
   async function downloadMedia(mediaId) {
@@ -243,7 +280,7 @@ export function createWecomCustomerService({
 
   async function markReplied(msgId, result) {
     await pool.query(
-      "UPDATE wecom_customer_messages SET status='replied',result=$2,error_message=NULL,next_retry_at=NULL,updated_at=NOW() WHERE msg_id=$1",
+      "UPDATE wecom_customer_messages SET status='replied',result=$2,error_message=NULL,next_retry_at=NULL,sent_at=COALESCE(sent_at,NOW()),updated_at=NOW() WHERE msg_id=$1",
       [msgId, result],
     );
   }
@@ -252,15 +289,18 @@ export function createWecomCustomerService({
     const msgId = String(rawMsgId || "").trim();
     if (!msgId) return;
     const safeMessage = sanitizeError(error);
-    await pool.query(
+    const result = await pool.query(
       `UPDATE wecom_customer_messages
        SET status='failed',error_message=$2,
            next_retry_at=NOW() + (LEAST(30, POWER(2, GREATEST(0,attempt_count-1))) * INTERVAL '1 minute'),
            updated_at=NOW()
-       WHERE msg_id=$1`,
+       WHERE msg_id=$1 AND sent_at IS NULL
+       RETURNING msg_id`,
       [msgId, safeMessage],
     );
-    await audit("wecom-customer", "wecom_customer_hermes_failed", { msgId, error: safeMessage });
+    if (result.rows[0]) {
+      await safeAudit("wecom-customer", "wecom_customer_hermes_failed", { msgId, error: safeMessage });
+    }
   }
 
   async function getAccessToken(force = false) {
@@ -301,6 +341,19 @@ export function createWecomCustomerService({
   }
 
   return { configured, handleEvent, processCustomerMessage, retryFailedMessages, resolveAccount };
+}
+
+function orderCustomerMessages(messages) {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .filter(({ message }) => message && typeof message === "object")
+    .sort((left, right) => {
+      const leftTime = Number(left.message.send_time || 0);
+      const rightTime = Number(right.message.send_time || 0);
+      if (leftTime && rightTime && leftTime !== rightTime) return leftTime - rightTime;
+      return left.index - right.index;
+    })
+    .map(({ message }) => message);
 }
 
 function normalizePayload(message, msgType) {

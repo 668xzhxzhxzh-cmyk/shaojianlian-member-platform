@@ -61,6 +61,7 @@ const coachNav = [
   { view: "coach-training", label: "训练方案", icon: Dumbbell, href: "/coach/training" },
   { view: "coach-nutrition", label: "饮食方案", icon: Apple, href: "/coach/nutrition" },
   { view: "coach-body", label: "身体反馈", icon: Activity, href: "/coach/body" },
+  { view: "coach-conversations", label: "客服记录", icon: MessageCircleMore, href: "/coach/conversations" },
   { view: "assistant", label: "Hermes AI 助理", icon: Bot, href: "/assistant" },
 ] as const;
 
@@ -271,7 +272,8 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
       case "coach-schedule":
       case "coach-training":
       case "coach-nutrition":
-      case "coach-body": {
+      case "coach-body":
+      case "coach-conversations": {
         const coachSectionMap: Record<string, CoachSection> = {
           coach: "overview",
           "coach-members": "members",
@@ -279,6 +281,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
           "coach-training": "training",
           "coach-nutrition": "nutrition",
           "coach-body": "body",
+          "coach-conversations": "conversations",
         };
         return <CoachWorkspace section={coachSectionMap[view] ?? "overview"} selectedMemberId={selectedCoachMember} onSelectMember={selectCoachMember} goTo={goTo} openAssistant={() => goTo("assistant", "/assistant", "Hermes AI 助理")} />;
       }

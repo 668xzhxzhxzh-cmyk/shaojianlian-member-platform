@@ -36,7 +36,8 @@ function createPool() {
         return { rows: conversations.has(params[0]) ? [{ turns_json: conversations.get(params[0]) }] : [] };
       }
       if (text.includes("INSERT INTO wecom_customer_conversations")) {
-        conversations.set(params[0], params[2]);
+        assert.equal(typeof params[2], "string");
+        conversations.set(params[0], JSON.parse(params[2]));
         return { rows: [] };
       }
       if (text.includes("UPDATE wecom_customer_messages")) return { rows: [] };
@@ -84,7 +85,7 @@ test("WeChat customer-service text uses only the exact external_userid binding",
   assert.equal(duplicate.duplicate, true);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].touser, "wm-customer-1");
-  assert.equal(sent[0].text.content, "8 月 18 日 15:00 有一节课。");
+  assert.equal(sent[0].text.content, "最近课程：8/18 15:00-16:00 一对一私教（已预约）");
 });
 
 test("WeChat customer-service discovers the exact account and persists its sync cursor", async () => {
@@ -171,4 +172,83 @@ test("WeChat customer-service image is downloaded and passed through Hermes visi
   assert.equal(result.replied, true);
   assert.equal(analyzedMimeType, "image/jpeg");
   assert.match(receivedDescription, /训练餐/);
+});
+
+test("WeChat customer-service serializes overlapping sync callbacks in message order", async () => {
+  configure();
+  let activeSyncs = 0;
+  let maxActiveSyncs = 0;
+  let releaseFirst;
+  let syncCalls = 0;
+  const firstBlocked = new Promise((resolve) => { releaseFirst = resolve; });
+  const service = createWecomCustomerService({
+    pool: {
+      async query(sql) {
+        if (String(sql).includes("SELECT cursor FROM wecom_customer_sync_state")) return { rows: [] };
+        if (String(sql).includes("INSERT INTO wecom_customer_sync_state")) return { rows: [] };
+        throw new Error(`Unexpected SQL: ${sql}`);
+      },
+    },
+    visionService: { configured: true },
+    replyService: { configured: true },
+    fetchImpl: async (url) => {
+      if (String(url).includes("/cgi-bin/gettoken")) return jsonResponse({ errcode: 0, access_token: "token", expires_in: 7200 });
+      if (String(url).includes("/cgi-bin/kf/sync_msg")) {
+        syncCalls += 1;
+        activeSyncs += 1;
+        maxActiveSyncs = Math.max(maxActiveSyncs, activeSyncs);
+        if (syncCalls === 1) await firstBlocked;
+        activeSyncs -= 1;
+        return jsonResponse({ errcode: 0, msg_list: [], has_more: 0, next_cursor: `cursor-${syncCalls}` });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+
+  const first = service.handleEvent({ openKfId: "wk-test-1", kfToken: "sync-token-1" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = service.handleEvent({ openKfId: "wk-test-1", kfToken: "sync-token-2" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(syncCalls, 1);
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.equal(syncCalls, 2);
+  assert.equal(maxActiveSyncs, 1);
+});
+
+test("a post-send conversation failure never marks the message for resend", async () => {
+  configure();
+  const updates = [];
+  const service = createWecomCustomerService({
+    pool: {
+      async query(sql, params = []) {
+        const text = String(sql);
+        if (text.includes("INSERT INTO wecom_customer_messages")) return { rows: [{ msg_id: params[0] }] };
+        if (text.includes("FROM member_wecom_bindings")) return { rows: [{ id: "member-1", name: "测试会员", state_json: {} }] };
+        if (text.includes("SELECT turns_json FROM wecom_customer_conversations")) return { rows: [] };
+        if (text.includes("INSERT INTO wecom_customer_conversations")) throw new Error("invalid input syntax for type json");
+        if (text.includes("UPDATE wecom_customer_messages")) { updates.push(text); return { rows: [] }; }
+        throw new Error(`Unexpected SQL: ${text}`);
+      },
+    },
+    visionService: { configured: true },
+    replyService: { configured: true, reply: async () => "已经收到并回复。" },
+    fetchImpl: async (url) => {
+      if (String(url).includes("/cgi-bin/gettoken")) return jsonResponse({ errcode: 0, access_token: "token", expires_in: 7200 });
+      return jsonResponse({ errcode: 0, errmsg: "ok" });
+    },
+  });
+
+  const result = await service.processCustomerMessage({
+    msgid: "msg-post-send-1",
+    open_kfid: "wk-test-1",
+    external_userid: "wm-customer-1",
+    origin: 3,
+    msgtype: "text",
+    text: { content: "你好" },
+  });
+  assert.equal(result.replied, true);
+  assert.equal(updates.length, 1);
+  assert.match(updates[0], /status='replied'/);
+  assert.doesNotMatch(updates[0], /status='failed'/);
 });

@@ -28,6 +28,16 @@ import { Avatar, Card, SectionTitle, TrendChart } from "./ui";
 
 type ChatMessage = { role: "coach" | "assistant"; content: string; time: string };
 type EvolutionReview = { review_date?: string; summary?: string; learned_rules?: string[] };
+type HermesConversation = {
+  id: string;
+  memberId: string;
+  memberName: string;
+  title: string;
+  updatedAt: string;
+  turns: Array<{ role: "user" | "assistant"; content: string }>;
+};
+
+const introMessage: ChatMessage = { role: "assistant", content: "你好，邵教练。我是 Hermes 执行型 AI 助理。请先选择会员，再直接交代查询或管理任务。", time: now() };
 
 const quickPrompts = [
   "查看当前会员完整档案",
@@ -54,12 +64,12 @@ export function AssistantView({
     id: state.profile.id,
     name: state.profile.name,
   };
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "你好，邵教练。我是 Hermes 执行型 AI 助理。请先从右侧选择会员，系统会安全锁定唯一档案。你可以直接让我增删或调整私教课程、更新会员档案、训练方案、饮食方案和身体反馈，执行结果会自动同步网站。", time: now() },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([introMessage]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<HermesConversation[]>([]);
+  const [conversationId, setConversationId] = useState("");
   const [memberOpen, setMemberOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
@@ -98,6 +108,20 @@ export function AssistantView({
       })
       .catch(() => undefined);
   }, [role]);
+
+  const loadHistory = useCallback(() => {
+    portalFetch(`/api/agent/conversations?member_id=${encodeURIComponent(activeMemberId)}`, role)
+      .then(async (response) => {
+        if (!response.ok) return;
+        const result = await response.json() as { conversations?: HermesConversation[] };
+        setHistoryItems(result.conversations ?? []);
+      })
+      .catch(() => undefined);
+  }, [activeMemberId, role]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [activeMemberId, loadHistory]);
 
   useEffect(() => {
     portalFetch("/api/hermes/evolution", role)
@@ -141,7 +165,8 @@ export function AssistantView({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           member_id: selectedProfile.id,
-          messages: nextMessages.map((item) => ({
+          conversation_id: conversationId || undefined,
+          messages: nextMessages.filter((item, index) => !(index === 0 && item === introMessage)).map((item) => ({
             role: item.role === "coach" ? "user" : "assistant",
             content: item.content,
           })),
@@ -150,10 +175,13 @@ export function AssistantView({
       });
       if (!response.ok) throw new Error(await response.text());
       if (!response.body) throw new Error("AI 暂时没有返回内容");
+      const nextConversationId = response.headers.get("x-conversation-id") || conversationId;
+      if (nextConversationId) setConversationId(nextConversationId);
       for await (const text of cumulativeText(response.body)) {
         setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: text } : item));
       }
       await refresh(selectedProfile.id);
+      loadHistory();
       notify("AI 操作已完成，会员页面已自动同步");
     } catch (error) {
       const timedOut = (error as Error).name === "AbortError";
@@ -189,9 +217,29 @@ export function AssistantView({
   function chooseMember(memberId: string) {
     setLocalMemberId(memberId);
     onSelectMember?.(memberId);
+    setConversationId("");
+    setMessages([introMessage]);
     setMemberOpen(false);
     const member = memberOptions.find((item) => item.id === memberId);
     setSaveState(`当前会员已切换为 ${member?.name ?? "所选会员"}`);
+  }
+
+  function openHistoryItem(item: HermesConversation) {
+    setConversationId(item.id);
+    setMessages(item.turns.map((turn) => ({
+      role: turn.role === "user" ? "coach" : "assistant",
+      content: turn.content,
+      time: formatConversationTime(item.updatedAt),
+    })));
+    setHistoryOpen(false);
+    followLatestRef.current = true;
+    window.setTimeout(() => scrollChatToLatest("auto"), 20);
+  }
+
+  function startNewConversation() {
+    setConversationId("");
+    setMessages([introMessage]);
+    setHistoryOpen(false);
   }
 
   return (
@@ -206,7 +254,7 @@ export function AssistantView({
       <div className="assistant-grid">
         <Card className="chat-panel">
           <div className="chat-heading"><div><MessageCircleMore size={20} /><b>与 Hermes 对话</b></div><button className={`icon-button ${historyOpen ? "active" : ""}`} onClick={() => setHistoryOpen((open) => !open)} aria-label="历史记录"><History size={18} /></button></div>
-          {historyOpen ? <div className="chat-history"><b>最近对话</b><button onClick={() => { setHistoryOpen(false); notify("已打开今天 10:32 的恢复分析"); }}>今天 10:32 · 李明恢复分析</button><button onClick={() => { setHistoryOpen(false); notify("已打开 7 月 27 日的饮食复盘"); }}>7 月 27 日 · 饮食执行复盘</button></div> : null}
+          {historyOpen ? <div className="chat-history"><div><b>最近对话</b><button onClick={startNewConversation}>新对话</button></div>{historyItems.length ? historyItems.map((item) => <button key={item.id} onClick={() => openHistoryItem(item)}><b>{item.title}</b><small>{item.memberName} · {formatConversationTime(item.updatedAt)}</small></button>) : <p>当前会员还没有历史对话</p>}</div> : null}
           <div
             className="chat-messages"
             ref={chatMessagesRef}
@@ -316,6 +364,12 @@ async function* cumulativeText(body: ReadableStream<Uint8Array>) {
     text += decoder.decode(value, { stream: true });
     yield text;
   }
+}
+
+function formatConversationTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "最近";
+  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" }).format(date);
 }
 
 function Recommendation({ icon: Icon, title, text, source, editing, onEdit }: { icon: typeof Dumbbell; title: string; text: string; source: string; editing: boolean; onEdit: () => void }) {

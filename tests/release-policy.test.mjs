@@ -82,7 +82,7 @@ test("production WeChat status inspection is read-only and sanitized", async () 
   const inspector = await read("scripts/inspect-wecom-customer-status.mjs");
   assert.match(deploy, /VERIFY_WECOM/);
   assert.match(deploy, /verify-wecom:/);
-  assert.match(inspector, /SELECT msg_id,msg_type,status,result,attempt_count,created_at,updated_at/);
+  assert.match(inspector, /SELECT msg_id,msg_type,status,result,attempt_count,error_message,sent_at,created_at,updated_at/);
   assert.match(inspector, /wecom_customer_service_callback/);
   assert.match(inspector, /\/var\/log\/nginx\/access\.log/);
   assert.match(inspector, /journalctl/);

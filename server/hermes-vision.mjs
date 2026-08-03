@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import {
+  avoidRepeatedCustomerReply,
+  recentImageDescription,
+  selectRelevantCustomerState,
+} from "./customer-fast-reply.mjs";
 
 const DEFAULT_VISION_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -38,7 +43,7 @@ export function createHermesVisionService({ fetchImpl = fetch } = {}) {
             },
           ],
         }],
-        max_tokens: 500,
+        max_tokens: 320,
         temperature: 0.1,
       }),
       signal: AbortSignal.timeout(45_000),
@@ -46,7 +51,7 @@ export function createHermesVisionService({ fetchImpl = fetch } = {}) {
     const data = await response.json().catch(() => ({}));
     const description = String(data?.choices?.[0]?.message?.content || "").trim();
     if (!response.ok || !description) throw providerError(response.status, data, "图片识别失败");
-    return description.slice(0, 1200);
+    return description.slice(0, 700);
   }
 
   return { analyzeImage, configured };
@@ -60,7 +65,8 @@ export function createHermesCustomerReplyService({ fetchImpl = fetch } = {}) {
 
   async function reply({ externalUserId, memberName, memberState, customerText = "", imageDescription = "", history = [] }) {
     if (!configured) throw publicError(503, "Hermes 客户回复模型尚未配置");
-    const safeState = selectCustomerVisibleState(memberState);
+    const contextualImage = imageDescription || recentImageDescription(history, customerText);
+    const safeState = selectRelevantCustomerState(memberState, customerText, contextualImage);
     const safeHistory = normalizeHistory(history);
     const response = await fetchImpl(new URL("/v1/chat/completions", apiUrl), {
       method: "POST",
@@ -75,21 +81,21 @@ export function createHermesCustomerReplyService({ fetchImpl = fetch } = {}) {
         tools: [],
         tool_choice: "none",
         temperature: 0.2,
-        max_tokens: 260,
+        max_tokens: 180,
         messages: [
           {
             role: "system",
-            content: "你是服务器上唯一 Hermes 的会员客服会话。当前请求来自已通过 external_userid 精确绑定的会员本人。此会话强制只读且未提供任何工具：只能依据给出的本人档案和最近对话回答，不能调用管理工具、不能修改数据、不能查看其他会员。回答简洁自然，最多 3 个短句、120 个汉字；不展示 member_id、external_userid 或内部编号。涉及伤痛、用药、疾病时不诊断，建议停止相关训练并联系教练或专业医务人员。图片描述来自百炼视觉技能，若描述不确定必须明确说明；把图片问题当作当前对话的一部分，不要声称看不到图片。",
+            content: "你是服务器上唯一 Hermes 的会员客服会话。当前请求来自已精确绑定的会员本人。会话只读且不能调用管理工具：只能依据给出的本人档案和最近对话回答，不能修改数据或查看他人。回答最多 3 个短句、120 个汉字，不展示任何内部编号。涉及伤痛或疾病不诊断，建议停止相关训练并联系教练或医务人员。图片描述由千问 3.7 Plus 从会员原图生成；最近对话已有[图片]描述时，‘这个/这餐/根据图片’均指最近图片，禁止声称看不到。只回答当前问题，不重复自我介绍、课表或无关进展。",
           },
           ...safeHistory,
           {
             role: "user",
             content: JSON.stringify({
               verifiedMember: { memberName },
-              customerText: String(customerText || "").slice(0, 1200),
-              imageDescription: String(imageDescription || "").slice(0, 1200),
+              customerText: String(customerText || "").slice(0, 600),
+              imageDescription: String(contextualImage || "").slice(0, 700),
               memberData: safeState,
-            }).slice(0, 14000),
+            }).slice(0, 6500),
           },
         ],
       }),
@@ -98,7 +104,7 @@ export function createHermesCustomerReplyService({ fetchImpl = fetch } = {}) {
     const data = await response.json().catch(() => ({}));
     const content = String(data?.choices?.[0]?.message?.content || "").trim();
     if (!response.ok || !content) throw providerError(response.status, data, "Hermes 客户回复失败");
-    return compactCustomerReply(content);
+    return compactCustomerReply(avoidRepeatedCustomerReply(content, safeHistory));
   }
 
   return { configured, reply };
@@ -106,10 +112,10 @@ export function createHermesCustomerReplyService({ fetchImpl = fetch } = {}) {
 
 function normalizeHistory(history) {
   if (!Array.isArray(history)) return [];
-  return history.slice(-8).flatMap((turn) => {
+  return history.slice(-4).flatMap((turn) => {
     if (!turn || typeof turn !== "object") return [];
     const role = turn.role === "assistant" ? "assistant" : turn.role === "user" ? "user" : "";
-    const content = String(turn.content || "").trim().slice(0, 600);
+    const content = String(turn.content || "").trim().slice(0, 350);
     return role && content ? [{ role, content }] : [];
   });
 }
@@ -131,22 +137,6 @@ export function compactCustomerReply(value, limit = 120) {
     .trim();
   const characters = Array.from(normalized);
   return characters.length <= limit ? normalized : `${characters.slice(0, limit - 1).join("")}…`;
-}
-
-function selectCustomerVisibleState(state) {
-  const source = state && typeof state === "object" ? state : {};
-  const profile = source.profile && typeof source.profile === "object" ? source.profile : {};
-  const safeProfile = Object.fromEntries(
-    Object.entries(profile).filter(([key]) => !["id", "phone"].includes(key)),
-  );
-  return {
-    profile: safeProfile,
-    bookings: Array.isArray(source.bookings) ? source.bookings.slice(-20) : [],
-    trainingPlan: source.trainingPlan || null,
-    nutritionPlan: source.nutritionPlan || null,
-    bodyMetrics: Array.isArray(source.bodyMetrics) ? source.bodyMetrics.slice(-8) : [],
-    bodyFeedbacks: Array.isArray(source.bodyFeedbacks) ? source.bodyFeedbacks.slice(-5) : [],
-  };
 }
 
 function parseProviderUrl(value, allowedSuffixes) {

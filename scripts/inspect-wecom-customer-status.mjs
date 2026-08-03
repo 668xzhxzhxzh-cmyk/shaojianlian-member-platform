@@ -70,6 +70,9 @@ async function inspectCallbackErrors() {
 function categorizeError(message) {
   const value = String(message || "");
   if (/errcode=\d+/i.test(value)) return value.match(/errcode=\d+/i)[0].toLowerCase();
+  if (/invalid input syntax.*json|malformed array literal/i.test(value)) return "conversation_json";
+  if (/provider=/i.test(value)) return "model_provider";
+  if (/duplicate key|foreign key|not-null/i.test(value)) return "database_constraint";
   if (/access_token/i.test(value)) return "access_token";
   if (/客服账号|open_kfid/i.test(value)) return "account_mismatch";
   if (/同步 Token/i.test(value)) return "sync_token";
@@ -81,7 +84,7 @@ function categorizeError(message) {
 try {
   const [messages, conversations, callbackAccess, callbackErrors, callbackRoute] = await Promise.all([
     pool.query(
-      `SELECT msg_id,msg_type,status,result,attempt_count,created_at,updated_at
+      `SELECT msg_id,msg_type,status,result,attempt_count,error_message,sent_at,created_at,updated_at
        FROM wecom_customer_messages
        ORDER BY created_at DESC LIMIT 20`,
     ),
@@ -98,6 +101,8 @@ try {
       status: row.status,
       result: row.result || null,
       attempts: Number(row.attempt_count || 0),
+      sent: Boolean(row.sent_at),
+      errorCategory: row.error_message ? categorizeError(row.error_message) : null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     })),

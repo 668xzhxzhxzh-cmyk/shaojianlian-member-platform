@@ -12,6 +12,9 @@ test("Hermes chat follows streaming replies without hijacking history review", a
   assert.match(assistant, /busy \? "auto" : "smooth"/);
   assert.match(assistant, /aria-live="polite"/);
   assert.doesNotMatch(assistant, /scrollIntoView/);
+  assert.match(assistant, /\/api\/agent\/conversations\?member_id=/);
+  assert.match(assistant, /openHistoryItem/);
+  assert.doesNotMatch(assistant, /今天 10:32 · 李明恢复分析/);
 });
 
 test("Hermes chat remains stable when the mobile keyboard opens", async () => {
@@ -21,6 +24,7 @@ test("Hermes chat remains stable when the mobile keyboard opens", async () => {
   ]);
 
   assert.match(css, /\.assistant-grid > \*, \.chat-panel, \.suggestion-column, \.evidence-column \{ min-width: 0; \}/);
+  assert.match(css, /@media \(max-width: 1600px\) and \(min-width: 1101px\)[\s\S]*\.assistant-grid/);
   assert.match(css, /\.chat-messages \{[^}]*overflow-x: hidden;[^}]*overscroll-behavior: contain;/s);
   assert.match(css, /\.chat-panel \{ min-height: 0; height: clamp\(540px,72svh,660px\); overflow: hidden; \}/);
   assert.match(css, /\.chat-input textarea \{ min-height: 72px; font-size: 16px;/);
