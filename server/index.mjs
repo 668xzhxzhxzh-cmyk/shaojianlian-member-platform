@@ -149,7 +149,7 @@ const server = createServer(async (request, response) => {
       region: "ezhou",
       time: new Date().toISOString(),
       integrations: {
-        deepseek: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
+        ai: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
         hermes: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
         wecomContact: wecomContact.contactConfigured,
         wecomCallback: wecomCallback.callbackConfigured,

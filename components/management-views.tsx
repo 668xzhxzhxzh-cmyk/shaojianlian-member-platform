@@ -156,7 +156,7 @@ function Task({ icon: Icon, label, count, onClick }: { icon: typeof MessageCircl
 type AdminSection = "overview" | "ai-suggestions" | "notifications" | "users" | "settings";
 type AdminUser = { id: string; name: string; role: string; phone: string; status: string };
 type IntegrationHealth = {
-  deepseek: boolean | null;
+  ai: boolean | null;
   memberTools: boolean | null;
   wecomContact: boolean | null;
   wecomCallback: boolean | null;
@@ -187,7 +187,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
     { id: "n3", title: "会员身体数据已更新", detail: "张伟新增体重与体脂记录", read: true },
   ]);
   const [settings, setSettings] = useState({ city: "鄂州", timezone: "Asia/Shanghai", hermesAutoSync: true, memberRegistration: true });
-  const [integrationHealth, setIntegrationHealth] = useState<IntegrationHealth>({ deepseek: null, memberTools: null, wecomContact: null, wecomCallback: null, wecomApp: null });
+  const [integrationHealth, setIntegrationHealth] = useState<IntegrationHealth>({ ai: null, memberTools: null, wecomContact: null, wecomCallback: null, wecomApp: null });
   const visibleUsers = users.filter((user) => !search || `${user.name}${user.role}${user.phone}${user.status}`.includes(search));
   const integrationValues = Object.values(integrationHealth);
   const healthyIntegrationCount = integrationValues.filter((value) => value === true).length;
@@ -215,10 +215,10 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
       .then(async (response) => {
         if (!response.ok) throw new Error("health unavailable");
         const result = await response.json() as {
-          integrations?: { deepseek?: boolean; hermesMemberTools?: boolean; wecomContact?: boolean; wecomCallback?: boolean; wecomApp?: boolean };
+          integrations?: { ai?: boolean; hermesMemberTools?: boolean; wecomContact?: boolean; wecomCallback?: boolean; wecomApp?: boolean };
         };
         setIntegrationHealth({
-          deepseek: Boolean(result.integrations?.deepseek),
+          ai: Boolean(result.integrations?.ai),
           memberTools: Boolean(result.integrations?.hermesMemberTools),
           wecomContact: Boolean(result.integrations?.wecomContact),
           wecomCallback: Boolean(result.integrations?.wecomCallback),
@@ -227,7 +227,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setIntegrationHealth({ deepseek: false, memberTools: false, wecomContact: false, wecomCallback: false, wecomApp: false });
+        setIntegrationHealth({ ai: false, memberTools: false, wecomContact: false, wecomCallback: false, wecomApp: false });
       });
     return () => controller.abort();
   }, []);
@@ -372,10 +372,10 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
               )}
             />
             <div className="integration-status-grid">
-              <button onClick={() => showIntegrationStatus("DeepSeek", integrationHealth.deepseek)}>
+              <button onClick={() => showIntegrationStatus("AI", integrationHealth.ai)}>
                 <span className="integration-icon"><Sparkles size={21} /></span>
-                <span><b>AI 分析服务</b><small>DeepSeek V4 Flash</small></span>
-                <IntegrationBadge value={integrationHealth.deepseek} ready="运行正常" unavailable="未配置" /><ArrowRight size={16} />
+                <span><b>AI 分析服务</b><small>智能推理服务</small></span>
+                <IntegrationBadge value={integrationHealth.ai} ready="运行正常" unavailable="未配置" /><ArrowRight size={16} />
               </button>
               <button onClick={() => showIntegrationStatus("AI 网站管理工具", integrationHealth.memberTools)}>
                 <span className="integration-icon"><Bot size={21} /></span>
@@ -453,7 +453,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
       <div className="admin-grid">
         <Card className="span-2">
           <SectionTitle title="平台运行状态" />
-          <div className="service-grid"><Service icon={Cloud} name="网站服务" detail="鄂州业务站运行正常" /><Service icon={Database} name="业务数据库" detail="PostgreSQL 持久化正常" /><Service icon={Bot} name="AI 分析服务" detail="DeepSeek V4 Flash 已接入" /><Service icon={MessageCircleMore} name="企业微信自建应用" detail={integrationHealth.wecomCallback && integrationHealth.wecomApp ? "官方回调与应用消息 · 已接入" : "官方回调与应用消息 · 待配置"} /></div>
+          <div className="service-grid"><Service icon={Cloud} name="网站服务" detail="鄂州业务站运行正常" /><Service icon={Database} name="业务数据库" detail="PostgreSQL 持久化正常" /><Service icon={Bot} name="AI 分析服务" detail="智能分析能力已接入" /><Service icon={MessageCircleMore} name="企业微信自建应用" detail={integrationHealth.wecomCallback && integrationHealth.wecomApp ? "官方回调与应用消息 · 已接入" : "官方回调与应用消息 · 待配置"} /></div>
         </Card>
         <Card>
           <SectionTitle title="安全与合规" />
@@ -468,7 +468,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
         <Card>
           <SectionTitle title="集成设置" />
           <div className="integration-list">
-            <button onClick={() => notify("DeepSeek 连接测试已提交")}><span><Sparkles size={20} /><b>DeepSeek API</b></span><em className="ok">已接入</em><ArrowRight size={16} /></button>
+            <button onClick={() => notify("AI 连接测试已提交")}><span><Sparkles size={20} /><b>AI 服务</b></span><em className="ok">已接入</em><ArrowRight size={16} /></button>
             <button onClick={() => showIntegrationStatus("企业微信自建应用", Boolean(integrationHealth.wecomCallback && integrationHealth.wecomApp))}><span><MessageCircleMore size={20} /><b>教练自建应用</b></span><em className={integrationHealth.wecomCallback && integrationHealth.wecomApp ? "ok" : ""}>{integrationHealth.wecomCallback && integrationHealth.wecomApp ? "已接入" : "待配置"}</em><ArrowRight size={16} /></button>
             <button onClick={() => notify("备份任务状态正常；最近一次恢复演练待执行", "info")}><span><Database size={20} /><b>数据备份</b></span><em className="ok">正常</em><ArrowRight size={16} /></button>
           </div>

@@ -245,7 +245,7 @@ export function AssistantView({
   return (
     <div className="assistant-page">
       <section className="page-intro assistant-intro">
-        <span className="eyebrow">Hermes Agent · DeepSeek V4 Flash</span>
+        <span className="eyebrow">Hermes Agent · AI</span>
         <h1>Hermes 教练执行工作台</h1>
         <p>这里是教练专用的对话与执行入口。选择会员后系统会安全锁定唯一档案，再让 Hermes 实际增删课程、调整训练与饮食方案；管理端的“AI 建议管理”只负责审核，不是同一个页面。</p>
         <div className="assistant-scope-note"><Bot size={20} /><span><b>教练端：对话并执行会员任务</b><small>管理端：审核建议、权限与发送合规</small></span></div>
@@ -328,7 +328,7 @@ export function AssistantView({
             <MiniTrend title="体脂率（%）" data={chartData} dataKey="bodyFat" />
           </Card>
           <Card className="agent-status">
-            <Bot size={24} /><div><b>AI 服务正常</b><span>DeepSeek 模型 · 鄂州服务区</span>{evolutionReview ? <small title={evolutionReview.summary}>每日复盘已开启 · {String(evolutionReview.review_date || "今日").slice(0, 10)} · {evolutionReview.learned_rules?.length ?? 0} 条规则</small> : <small>每日复盘已开启 · 等待首次运行</small>}</div><i />
+            <Bot size={24} /><div><b>AI 服务正常</b><span>智能分析 · 鄂州服务区</span>{evolutionReview ? <small title={evolutionReview.summary}>每日复盘已开启 · {String(evolutionReview.review_date || "今日").slice(0, 10)} · {evolutionReview.learned_rules?.length ?? 0} 条规则</small> : <small>每日复盘已开启 · 等待首次运行</small>}</div><i />
           </Card>
         </div>
       </div>
