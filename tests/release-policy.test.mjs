@@ -121,7 +121,7 @@ test("project Skill and AGENTS rules require verification before completion", as
     read(".agents/skills/safe-web-release/references/checklist.md"),
   ]);
 
-  assert.match(skill, /^---\nname: safe-web-release\n/m);
+  assert.match(skill, /^---\r?\nname: safe-web-release\r?\n/m);
   assert.match(skill, /读取仓库根目录 `AGENTS\.md`/);
   assert.match(skill, /未经用户确认不得运行第一次新工作流正式部署/);
   assert.match(agents, /禁止在生产服务器执行 `npm ci`、`npm install`、`npm run build`/);

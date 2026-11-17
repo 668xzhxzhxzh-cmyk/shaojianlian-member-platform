@@ -1298,3 +1298,12 @@ button.table-row:hover { background: #faf9f4; }
   .portal-main, .portal-management .portal-main { padding: 0; }
   .card { box-shadow: none; break-inside: avoid; }
 }
+
+/* 登录状态校验中与临时密码弹窗（A 批安全改造） */
+.auth-loading-brand { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 56px 24px; text-align: center; }
+.auth-loading-brand b { font-size: 20px; letter-spacing: .5px; }
+.auth-loading-brand small { color: var(--muted); }
+.login-form-panel-wide { width: min(560px, 100%); }
+.temporary-password-box { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 1px dashed var(--line, #d8dcc8); border-radius: 12px; background: var(--surface, #fbfaf3); margin: 4px 0 16px; }
+.temporary-password-box code { flex: 1; font-size: 18px; font-weight: 700; letter-spacing: 1px; word-break: break-all; color: var(--text, #1f221b); }
+.modal-hint { font-size: 12px; color: var(--muted); }

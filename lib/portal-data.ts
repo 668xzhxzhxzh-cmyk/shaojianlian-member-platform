@@ -235,6 +235,28 @@ export const demoState: PortalState = {
   ],
 };
 
+export const emptyPortalState: PortalState = {
+  profile: {
+    id: "",
+    name: "",
+    phone: "",
+    plan: "",
+    expiresAt: "",
+    coach: "",
+    level: "",
+  },
+  bodyMetrics: [],
+  meals: [],
+  waterMl: 0,
+  checkinDates: [],
+  streak: 0,
+  bookings: [],
+  suggestions: [],
+  trainingPlan: { phase: "", goal: "", frequency: 0, focus: "", note: "", updatedAt: "", days: [] },
+  nutritionPlan: { calories: 0, protein: 0, carbs: 0, fat: 0, reminder: "", updatedAt: "", meals: [] },
+  bodyFeedbacks: [],
+};
+
 export const trainingExercises = [
   { name: "深蹲", detail: "4 组 × 12 次", load: "40 kg", focus: "下肢力量" },
   { name: "杠铃卧推", detail: "4 组 × 10 次", load: "30 kg", focus: "胸部" },

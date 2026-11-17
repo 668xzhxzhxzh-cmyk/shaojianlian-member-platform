@@ -135,11 +135,11 @@ export function CoachWorkspace({
           {section !== "members" ? (
             <MemberContextBar member={selectedMember} members={members} onSelectMember={onSelectMember} goTo={goTo} />
           ) : null}
-          {section === "members" ? <MemberManagement members={members} selectedMemberId={selectedMember.id} onSelectMember={onSelectMember} goTo={goTo} profile={state.profile} onUpdateProfile={updateMemberProfile} /> : null}
-          {section === "schedule" ? <CoachSchedule member={selectedMember} bookings={state.bookings} addBooking={addCoachBooking} deleteBooking={deleteCoachBooking} /> : null}
-          {section === "training" ? <TrainingDesigner key={`${selectedMember.id}-${state.profile.id}-${state.trainingPlan?.updatedAt ?? "default"}`} member={selectedMember} plan={state.trainingPlan ?? defaultTrainingPlan} onSave={saveTrainingPlan} /> : null}
-          {section === "nutrition" ? <NutritionDesigner key={`${selectedMember.id}-${state.profile.id}-${state.nutritionPlan?.updatedAt ?? "default"}`} member={selectedMember} plan={state.nutritionPlan ?? defaultNutritionPlan} onSave={saveNutritionPlan} /> : null}
-          {section === "body" ? <BodyFeedback key={`${selectedMember.id}-${state.profile.id}-${state.bodyFeedbacks?.at(-1)?.id ?? "none"}`} member={selectedMember} data={state.bodyMetrics} feedbacks={state.bodyFeedbacks ?? []} onSave={saveBodyFeedback} /> : null}
+          {section === "members" ? <MemberManagement members={members} selectedMemberId={selectedMember.id} onSelectMember={onSelectMember} goTo={goTo} profile={state.profile} onUpdateProfile={(profile) => updateMemberProfile(profile, selectedMember.id)} /> : null}
+          {section === "schedule" ? <CoachSchedule member={selectedMember} bookings={state.bookings} addBooking={(booking) => addCoachBooking(booking, selectedMember.id)} deleteBooking={(id) => deleteCoachBooking(id, selectedMember.id)} /> : null}
+          {section === "training" ? <TrainingDesigner key={`${selectedMember.id}-${state.profile.id}-${state.trainingPlan?.updatedAt ?? "default"}`} member={selectedMember} plan={state.trainingPlan ?? defaultTrainingPlan} onSave={(plan) => saveTrainingPlan(plan, selectedMember.id)} /> : null}
+          {section === "nutrition" ? <NutritionDesigner key={`${selectedMember.id}-${state.profile.id}-${state.nutritionPlan?.updatedAt ?? "default"}`} member={selectedMember} plan={state.nutritionPlan ?? defaultNutritionPlan} onSave={(plan) => saveNutritionPlan(plan, selectedMember.id)} /> : null}
+          {section === "body" ? <BodyFeedback key={`${selectedMember.id}-${state.profile.id}-${state.bodyFeedbacks?.at(-1)?.id ?? "none"}`} member={selectedMember} data={state.bodyMetrics} feedbacks={state.bodyFeedbacks ?? []} onSave={(feedback) => saveBodyFeedback(feedback, selectedMember.id)} /> : null}
           {section === "conversations" ? <CustomerConversationArchive role={role} /> : null}
         </>
       )}

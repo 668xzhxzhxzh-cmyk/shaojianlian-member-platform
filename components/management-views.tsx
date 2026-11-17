@@ -35,24 +35,12 @@ const attendanceData = [
   { date: "7/14", value: 83 }, { date: "7/19", value: 64 }, { date: "7/24", value: 70 }, { date: "7/29", value: 82 },
 ];
 
-async function copyTemporaryPassword(password: string) {
-  if (!window.isSecureContext || !navigator.clipboard) return false;
-  try {
-    await Promise.race([
-      navigator.clipboard.writeText(password),
-      new Promise((_, reject) => window.setTimeout(() => reject(new Error("clipboard timeout")), 800)),
-    ]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function CoachView({ openAssistant }: { openAssistant: () => void }) {
   const { state, role, updateSuggestion, notify } = usePortal();
   const [search, setSearch] = useState("");
   const [risk, setRisk] = useState("全部风险等级");
   const [newMemberOpen, setNewMemberOpen] = useState(false);
+  const [temporaryPassword, setTemporaryPassword] = useState<{ name: string; password: string } | null>(null);
   const pending = state.suggestions.filter((item) => item.status === "待确认");
   const visibleMembers = memberRows.filter((member) => (!search || member.name.includes(search) || member.plan.includes(search)) && (risk === "全部风险等级" || member.risk === risk));
 
@@ -67,13 +55,14 @@ export function CoachView({ openAssistant }: { openAssistant: () => void }) {
         body: JSON.stringify({ name, phone: data.get("phone"), role: "member" }),
       });
       if (response.status === 404) {
-        notify(`演示环境已完成 ${name} 的新增会员流程`, "info");
+        notify("当前运行环境未启用此功能，请在生产环境操作", "info");
       } else {
         const result = await response.json() as { temporaryPassword?: string; error?: string };
         if (!response.ok) throw new Error(result.error || "会员创建失败");
         if (result.temporaryPassword) {
-          const copied = await copyTemporaryPassword(result.temporaryPassword);
-          notify(copied ? `${name} 已创建，临时密码已复制` : `${name} 已创建，临时密码：${result.temporaryPassword}`, copied ? "success" : "info");
+          setTemporaryPassword({ name, password: result.temporaryPassword });
+        } else {
+          notify(`${name} 已创建`, "success");
         }
       }
       setNewMemberOpen(false);
@@ -145,6 +134,9 @@ export function CoachView({ openAssistant }: { openAssistant: () => void }) {
           </form>
         </div>
       ) : null}
+      {temporaryPassword ? (
+        <TemporaryPasswordModal name={temporaryPassword.name} password={temporaryPassword.password} onClose={() => setTemporaryPassword(null)} />
+      ) : null}
     </div>
   );
 }
@@ -174,6 +166,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
   const [suggestionFilter, setSuggestionFilter] = useState<"全部" | "待确认" | "草稿" | "已发送">("全部");
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
   const [managedUser, setManagedUser] = useState<AdminUser | null>(null);
+  const [temporaryPassword, setTemporaryPassword] = useState<{ name: string; password: string } | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([
     { id: "admin-shao", name: "系统管理员", role: "管理员", phone: "138****8808", status: "正常" },
     { id: "coach-shao", name: "邵教练", role: "教练", phone: "138****6608", status: "正常" },
@@ -261,13 +254,14 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
         body: JSON.stringify({ name, phone: data.get("phone"), role: roleMap[String(data.get("role"))] || "member" }),
       });
       if (response.status === 404) {
-        notify(`演示环境已完成 ${name} 的账号创建流程`, "info");
+        notify("当前运行环境未启用此功能，请在生产环境操作", "info");
       } else {
         const result = await response.json() as { temporaryPassword?: string; error?: string };
         if (!response.ok) throw new Error(result.error || "账号创建失败");
         if (result.temporaryPassword) {
-          const copied = await copyTemporaryPassword(result.temporaryPassword);
-          notify(copied ? `${name} 已创建，临时密码已复制` : `${name} 已创建，临时密码：${result.temporaryPassword}`, copied ? "success" : "info");
+          setTemporaryPassword({ name, password: result.temporaryPassword });
+        } else {
+          notify(`${name} 已创建`, "success");
         }
       }
       setUsers((current) => [...current, { id: `local-${Date.now()}`, name, phone: String(data.get("phone") || ""), role: String(data.get("role") || "会员"), status: "正常" }]);
@@ -286,14 +280,20 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
     const next = { ...managedUser, role: managedRole, status };
     setUsers((current) => current.map((user) => user.id === next.id ? next : user));
     try {
-      await portalFetch("/api/users", role, {
+      const response = await portalFetch("/api/users", role, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id: next.id, role: managedRole === "管理员" ? "admin" : managedRole === "教练" ? "coach" : "member", status: status === "正常" ? "active" : "disabled" }),
       });
-    } catch {}
-    notify(`${next.name} 的账户权限已更新`);
-    setManagedUser(null);
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(result.error || "账户更新失败");
+      }
+      notify(`${next.name} 的账户权限已更新`);
+      setManagedUser(null);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "账户更新失败", "warning");
+    }
   }
 
   if (section === "ai-suggestions") {
@@ -495,6 +495,44 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
           </form>
         </div>
       ) : null}
+      {temporaryPassword ? (
+        <TemporaryPasswordModal name={temporaryPassword.name} password={temporaryPassword.password} onClose={() => setTemporaryPassword(null)} />
+      ) : null}
+    </div>
+  );
+}
+
+function TemporaryPasswordModal({ name, password, onClose }: { name: string; password: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    if (window.isSecureContext && navigator.clipboard) {
+      try {
+        await Promise.race([
+          navigator.clipboard.writeText(password),
+          new Promise((_, reject) => window.setTimeout(() => reject(new Error("clipboard timeout")), 800)),
+        ]);
+        setCopied(true);
+        return;
+      } catch {
+        // 剪贴板不可用时保留手动选择复制
+      }
+    }
+    setCopied(false);
+  }
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="账号临时密码">
+      <div className="modal modal-compact" onMouseDown={(event) => event.stopPropagation()}>
+        <button type="button" className="icon-button modal-close" onClick={onClose} aria-label="关闭"><X size={20} /></button>
+        <span className="eyebrow">账号已创建 · {name}</span>
+        <h2>临时登录密码</h2>
+        <p>临时密码只显示这一次，请通过安全方式单独转告本人，并提醒首次登录后联系教练修改密码：</p>
+        <div className="temporary-password-box">
+          <code>{password}</code>
+          <button type="button" className="button button-secondary" onClick={copy}>{copied ? "已复制" : "复制密码"}</button>
+        </div>
+        <p className="modal-hint">请勿把密码发到群聊、截图留存或写入聊天记录；本弹窗关闭后密码不再展示。</p>
+        <div className="modal-actions"><button className="button button-primary" onClick={onClose}>我已安全记录</button></div>
+      </div>
     </div>
   );
 }
