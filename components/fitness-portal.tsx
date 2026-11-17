@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { type ComponentType, type FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -102,7 +102,7 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [selectedCoachMember, setSelectedCoachMember] = useState("member-li");
-  const [authStatus, setAuthStatus] = useState<"checking" | "demo" | "authenticated" | "unauthorized">("checking");
+  const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "unauthorized">("checking");
 
   const navigation = role === "member" ? memberNav : role === "coach" ? coachNav : adminNav;
   const management = role !== "member";
@@ -110,25 +110,19 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
   const accountSubtitle = role === "member" ? "尊享会员" : role === "coach" ? "主教练" : "平台管理员";
   const sidebarSubtitle = role === "coach" ? "私人健身教练 · 鄂州" : "独立管理账户 · 权限审计";
   const pendingAiCount = state.suggestions.filter((item) => item.status === "待确认").length;
-  const notificationItems = role === "admin" ? [
-    { id: "admin-system", icon: ShieldCheck, title: "系统通知待处理", detail: "查看平台安全与业务通知", time: "刚刚", view: "admin-notifications", href: "/admin/notifications", label: "消息通知" },
-    { id: "admin-ai", icon: Sparkles, title: "AI 建议等待审核", detail: `${pendingAiCount} 条建议需要合规复核`, time: "8 分钟", view: "admin-ai", href: "/admin/ai-suggestions", label: "AI 建议管理" },
-    { id: "admin-user", icon: UsersRound, title: "新增会员账号", detail: "新注册会员等待角色确认", time: "今天", view: "admin-users", href: "/admin/users", label: "用户与角色" },
-    { id: "admin-audit", icon: Activity, title: "会员数据变更记录", detail: "训练方案与课程记录有新变更", time: "今天", view: "admin-notifications", href: "/admin/notifications", label: "消息通知" },
-    { id: "admin-config", icon: Settings, title: "系统配置检查完成", detail: "网站、数据库和 Hermes 服务运行正常", time: "昨天", view: "admin-settings", href: "/admin/settings", label: "系统设置" },
-  ] : role === "coach" ? [
-    { id: "coach-schedule", icon: CalendarDays, title: "私教排期待确认", detail: "明天 14:00 一对一私教", time: "刚刚", view: "coach-schedule", href: "/coach/schedule", label: "课程排期" },
-    { id: "coach-hermes", icon: Bot, title: "Hermes 可执行会员任务", detail: "可增删课程并调整训练、饮食方案", time: "8 分钟", view: "assistant", href: "/assistant", label: "Hermes AI 助理" },
-    { id: "coach-body", icon: Activity, title: "会员身体数据已更新", detail: "李明最新体重 67.9 kg", time: "今天", view: "coach-body", href: "/coach/body", label: "身体反馈" },
-    { id: "coach-nutrition", icon: Apple, title: "饮食执行需要跟进", detail: "两位会员今日饮食记录未完成", time: "今天", view: "coach-nutrition", href: "/coach/nutrition", label: "饮食方案" },
-    { id: "coach-member", icon: UsersRound, title: "会员计划即将到期", detail: "一位会员计划将在 7 天内到期", time: "昨天", view: "coach-members", href: "/coach/members", label: "会员管理" },
-  ] : [
-    { id: "member-schedule", icon: CalendarDays, title: "私教安排已更新", detail: "明天 14:00 一对一私教", time: "刚刚", view: "dashboard", href: "/", label: "首页" },
-    { id: "member-nutrition", icon: Apple, title: "今日饮食待记录", detail: "晚餐与饮水目标尚未完成", time: "8 分钟", view: "nutrition", href: "/nutrition", label: "饮食管理" },
-    { id: "member-body", icon: Activity, title: "身体数据已更新", detail: "最新体重 67.9 kg", time: "今天", view: "body", href: "/body", label: "身体数据" },
-    { id: "member-checkin", icon: CalendarCheck, title: "连续打卡提醒", detail: "完成今日记录可保持连续打卡", time: "今天", view: "checkins", href: "/checkins", label: "打卡记录" },
-    { id: "member-benefits", icon: Trophy, title: "会员权益提醒", detail: "本月体态评估权益尚未使用", time: "昨天", view: "benefits", href: "/benefits", label: "会员权益" },
-  ];
+  // 通知中心：演示数据已移除。真实通知需要后端下发（后续批次实现），
+  // 未登录或数据未就绪时不展示任何伪造通知。
+  type NotificationItem = {
+    id: string;
+    icon: ComponentType<{ size?: number }>;
+    title: string;
+    detail: string;
+    time: string;
+    view: PortalView;
+    href: string;
+    label: string;
+  };
+  const notificationItems: NotificationItem[] = [];
   const unreadNotificationCount = notificationItems.filter((item) => !readNotificationIds.includes(item.id)).length;
 
   useEffect(() => {
@@ -138,12 +132,8 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
           setAuthStatus("unauthorized");
           return;
         }
-        if (response.status === 404) {
-          setAuthStatus("demo");
-          return;
-        }
         if (!response.ok) {
-          setAuthStatus("demo");
+          setAuthStatus("unauthorized");
           return;
         }
         const result = await response.json() as { user?: { role?: Role } };
@@ -174,10 +164,10 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
           setAuthStatus("authenticated");
           void refresh();
         } else {
-          setAuthStatus("demo");
+          setAuthStatus("unauthorized");
         }
       })
-      .catch(() => setAuthStatus("demo"));
+      .catch(() => setAuthStatus("unauthorized"));
   }, [initialRole, refresh]);
 
   useEffect(() => {
@@ -192,6 +182,20 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
+
+  if (authStatus === "checking") {
+    return (
+      <main className="login-page member-login-page">
+        <section className="login-form-panel login-form-panel-wide">
+          <div className="auth-loading-brand">
+            <span className="brand-mark"><Activity size={28} /></span>
+            <b>邵教练专属会员平台</b>
+            <small>正在验证登录状态…</small>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   if (authStatus === "unauthorized") {
     return <LoginScreen requestedRole={initialRole} onSuccess={(userRole) => {
@@ -222,8 +226,6 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
     const resolvedLabel = label ?? navigation.find((item) => item.view === nextView)?.label ?? memberNav.find((item) => item.view === nextView)?.label;
     if (resolvedLabel) setActiveNavLabel(resolvedLabel);
     setView(nextView);
-    if (authStatus === "demo" && nextView === "coach") setRole("coach");
-    if (authStatus === "demo" && nextView === "admin") setRole("admin");
     const resolvedHref = href ?? [...memberNav, ...coachNav, ...adminNav].find((item) => item.view === nextView)?.href ?? "/";
     if (window.location.pathname !== resolvedHref) window.history.pushState({}, "", resolvedHref);
     window.scrollTo(0, 0);
@@ -311,9 +313,9 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
           <div className="notification-menu">
             <button className={`icon-button notification-button ${notificationOpen ? "active" : ""}`} onClick={() => { setNotificationOpen((open) => !open); setProfileOpen(false); }} aria-label={`通知，${unreadNotificationCount} 条未读`} aria-expanded={notificationOpen}><Bell size={20} />{unreadNotificationCount ? <i>{unreadNotificationCount}</i> : null}</button>
             {notificationOpen ? <div className="notification-popover">
-              <div className="row-between"><span><b>消息通知</b><small>共 5 条 · {unreadNotificationCount} 条未读</small></span><button className="text-button" onClick={() => { setReadNotificationIds(notificationItems.map((item) => item.id)); notify("5 条通知已全部标为已读"); }}>全部已读</button></div>
+              <div className="row-between"><span><b>消息通知</b><small>共 {notificationItems.length} 条 · {unreadNotificationCount} 条未读</small></span>{notificationItems.length ? <button className="text-button" onClick={() => { setReadNotificationIds(notificationItems.map((item) => item.id)); notify(`${notificationItems.length} 条通知已全部标为已读`); }}>全部已读</button> : null}</div>
               <div className="notification-popover-list" tabIndex={0} aria-label="通知列表，可上下滚动">
-                {notificationItems.map(({ id, icon: Icon, title, detail, time, view: nextView, href, label }) => <button className={readNotificationIds.includes(id) ? "is-read" : ""} key={id} onClick={() => { setReadNotificationIds((current) => current.includes(id) ? current : [...current, id]); setNotificationOpen(false); goTo(nextView, href, label); }}><Icon size={18} /><span><b>{title}</b><small>{detail}</small></span><em>{time}</em></button>)}
+                {notificationItems.length === 0 ? <div className="empty-hint">暂无新通知</div> : notificationItems.map(({ id, icon: Icon, title, detail, time, view: nextView, href, label }) => <button className={readNotificationIds.includes(id) ? "is-read" : ""} key={id} onClick={() => { setReadNotificationIds((current) => current.includes(id) ? current : [...current, id]); setNotificationOpen(false); goTo(nextView, href, label); }}><Icon size={18} /><span><b>{title}</b><small>{detail}</small></span><em>{time}</em></button>)}
               </div>
             </div> : null}
           </div>
@@ -321,10 +323,10 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
             <button className="profile-trigger" onClick={() => { setProfileOpen((open) => !open); setNotificationOpen(false); }} aria-expanded={profileOpen}><Avatar name={accountName} /><span><b>{accountName}</b><small>{accountSubtitle}</small></span><ChevronDown size={16} /></button>
             {profileOpen ? (
               <div className="profile-popover">
-                <span className="eyebrow">{authStatus === "demo" ? "切换演示角色" : "当前账号"}</span>
-                {(authStatus === "demo" || authorizedRole === "member") ? <button className={role === "member" ? "active" : ""} onClick={() => switchRole("member")}><UserRound size={17} /> 会员端{role === "member" ? <CheckCircle2 size={15} /> : null}</button> : null}
-                {(authStatus === "demo" || authorizedRole === "coach") ? <button className={role === "coach" ? "active" : ""} onClick={() => switchRole("coach")}><Dumbbell size={17} /> 教练端{role === "coach" ? <CheckCircle2 size={15} /> : null}</button> : null}
-                {(authStatus === "demo" || authorizedRole === "admin") ? <button className={role === "admin" ? "active" : ""} onClick={() => switchRole("admin")}><ShieldCheck size={17} /> 管理端{role === "admin" ? <CheckCircle2 size={15} /> : null}</button> : null}
+                <span className="eyebrow">当前账号</span>
+                {authorizedRole === "member" ? <button className={role === "member" ? "active" : ""} onClick={() => switchRole("member")}><UserRound size={17} /> 会员端{role === "member" ? <CheckCircle2 size={15} /> : null}</button> : null}
+                {authorizedRole === "coach" ? <button className={role === "coach" ? "active" : ""} onClick={() => switchRole("coach")}><Dumbbell size={17} /> 教练端{role === "coach" ? <CheckCircle2 size={15} /> : null}</button> : null}
+                {authorizedRole === "admin" ? <button className={role === "admin" ? "active" : ""} onClick={() => switchRole("admin")}><ShieldCheck size={17} /> 管理端{role === "admin" ? <CheckCircle2 size={15} /> : null}</button> : null}
                 {authStatus === "authenticated" ? <button className="logout-button" onClick={logout}><LogOut size={17} /> 退出登录</button> : null}
               </div>
             ) : null}
@@ -358,7 +360,6 @@ function PortalShell({ initialView }: { initialView: PortalView }) {
             <div className="row-between"><div className="brand"><span className="brand-mark"><Activity size={22} /></span><b>功能导航</b></div><button className="icon-button" onClick={() => setMobileOpen(false)} aria-label="关闭"><X size={20} /></button></div>
             <p>{formatShanghaiDate()}</p>
             <nav>{navigation.map(({ view: itemView, label, icon: Icon, href }, index) => <a key={`${label}-drawer-${index}`} href={href} className={activeNavLabel === label ? "active" : ""} onClick={(event) => { event.preventDefault(); goTo(itemView, href, label); }}><Icon size={19} />{label}</a>)}</nav>
-            {authStatus === "demo" ? <div className="role-switch-mobile"><span>切换演示角色</span><button onClick={() => switchRole("member")} className={role === "member" ? "active" : ""}>会员</button><button onClick={() => switchRole("coach")} className={role === "coach" ? "active" : ""}>教练</button><button onClick={() => switchRole("admin")} className={role === "admin" ? "active" : ""}>管理</button></div> : null}
           </aside>
         </div>
       ) : null}

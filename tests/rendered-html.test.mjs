@@ -40,7 +40,8 @@ test("includes coach approval, native agent and WeCom self-built app tooling", a
   assert.match(app, /cgi-bin\/message\/send/);
   assert.match(hermesConfig, /context_length: 1000000/);
   assert.match(hermesConfig, /create_member_binding_qr/);
-  assert.match(server, /THEN users\.name ELSE EXCLUDED\.name/);
+  assert.match(server, /ON CONFLICT \(id\) DO NOTHING/);
+  assert.match(server, /绝不覆盖已有账号的手机号、姓名、角色或密码/);
   assert.match(assistant, /Hermes 本次处理超时/);
   assert.doesNotMatch(`${assistant}${contact}`, /notifications\/weixin|WECOM_WEBHOOK_URL/);
 });
@@ -186,7 +187,7 @@ test("separates administrator and coach accounts, portals, and permissions", asy
   assert.match(coachLoginRoute, /initialView="coach"/);
 });
 
-test("shows five scrollable notifications, explains AI roles, and uses single-column management login", async () => {
+test("shows an empty notification center without demo data, explains AI roles, and uses single-column management login", async () => {
   const [portal, assistant, css, mcpConfig] = await Promise.all([
     readFile(new URL("../components/fitness-portal.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/assistant-view.tsx", import.meta.url), "utf8"),
@@ -194,8 +195,9 @@ test("shows five scrollable notifications, explains AI roles, and uses single-co
     readFile(new URL("../deployment/hermes-wecom-mcp.example.yaml", import.meta.url), "utf8"),
   ]);
   assert.match(portal, /notification-popover-list/);
-  assert.match(portal, /共 5 条/);
-  assert.match(portal, /Hermes 可执行会员任务/);
+  assert.match(portal, /共 \{notificationItems\.length\} 条/);
+  assert.match(portal, /暂无新通知/);
+  assert.doesNotMatch(portal, /Hermes 可执行会员任务/);
   assert.match(portal, /role === "admin" && itemView === "admin-ai"/);
   assert.match(css, /max-height: 338px; overflow-y: auto/);
   assert.match(css, /touch-action: pan-y/);

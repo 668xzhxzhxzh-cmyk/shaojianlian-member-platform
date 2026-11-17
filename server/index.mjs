@@ -28,12 +28,73 @@ import {
 const { Pool } = pg;
 const port = Number(process.env.API_PORT || 8788);
 const host = process.env.API_HOST || "0.0.0.0";
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+function requireSecret(name, { minLength = 1, forbidden = [] } = {}) {
+  const value = String(process.env[name] || "");
+  const invalid = !value || value.length < minLength || forbidden.includes(value);
+  if (invalid) {
+    console.error(`[fail-fast] 环境变量 ${name} 缺失、过短或仍是默认占位值，服务拒绝启动。请在 /opt/shao-coach/.env 中配置真实值。`);
+    process.exit(1);
+  }
+  return value;
+}
+
+// 生产启动强校验：避免以默认密钥/默认账号密码运行（本地开发请显式设置这些变量后再启动 API）。
 const sessionSecret = new TextEncoder().encode(
-  process.env.SESSION_SECRET || "replace-this-before-production",
+  requireSecret("SESSION_SECRET", {
+    minLength: 32,
+    forbidden: ["replace-with-a-long-random-secret", "replace-this-before-production"],
+  }),
 );
+requireSecret("DATABASE_URL", { minLength: 12 });
+for (const [key, fallback] of [
+  ["MEMBER_PHONE", "13800005206"],
+  ["COACH_PHONE", "13800006608"],
+  ["ADMIN_PHONE", "13800008808"],
+]) {
+  requireSecret(key, { minLength: 11, forbidden: [fallback] });
+}
+for (const [key, fallback] of [
+  ["MEMBER_PASSWORD", "Member@2026"],
+  ["COACH_PASSWORD", "Coach@2026"],
+  ["ADMIN_PASSWORD", "Admin@2026"],
+]) {
+  requireSecret(key, { minLength: 8, forbidden: [fallback] });
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 8,
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 30000,
+  application_name: "shao-api",
+  statement_timeout: 15000,
+  query_timeout: 15000,
+});
 const allowedOrigin = process.env.ALLOWED_ORIGIN || "";
 const cookieSecure = String(process.env.COOKIE_SECURE || "true").toLowerCase() !== "false";
+if (cookieSecure && /^http:\/\//i.test(String(process.env.PUBLIC_URL || process.env.SITE_ADDRESS || ""))) {
+  console.warn("[config] COOKIE_SECURE=true 但 PUBLIC_URL 仍为 http://：浏览器将无法保存登录 Cookie。IP 验收期请设置 COOKIE_SECURE=false，域名/HTTPS 就绪后改回 true。");
+}
+
+// 登录/注册应用层限速（Nginx limit_req 之外的纵深防御）：内存桶，失败/尝试均计数。
+const rateBuckets = new Map();
+const RATE_WINDOW_MS = 15 * 60 * 1000;
+function rateLimited(key, windowMs, max) {
+  const now = Date.now();
+  const timestamps = (rateBuckets.get(key) || []).filter((t) => now - t < windowMs);
+  if (timestamps.length >= max) return true;
+  rateBuckets.set(key, [...timestamps, now]);
+  return false;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamps] of rateBuckets) {
+    const alive = timestamps.filter((t) => now - t < RATE_WINDOW_MS);
+    if (alive.length === 0) rateBuckets.delete(key);
+    else rateBuckets.set(key, alive);
+  }
+}, 5 * 60 * 1000).unref();
 
 const seedState = {
   profile: { id: "member-li", name: "李明", phone: "138****5206", plan: "尊享会员 · 年度计划", expiresAt: "2027/07/10", coach: "邵教练", level: "VIP" },
@@ -442,14 +503,12 @@ async function initializeDatabase() {
   ];
   for (const [id, phone, name, role, password] of accounts) {
     const hash = await bcrypt.hash(password, 12);
+    // 只在账号不存在时创建；绝不覆盖已有账号的手机号、姓名、角色或密码，
+    // 避免每次重启把种子账号密码重置为环境变量值（密码轮换只能通过受控流程执行）。
     await pool.query(
       `INSERT INTO users (id, phone, name, role, password_hash)
        VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (id) DO UPDATE
-       SET phone=EXCLUDED.phone,
-           name=CASE WHEN EXCLUDED.role='member' THEN users.name ELSE EXCLUDED.name END,
-           role=EXCLUDED.role,
-           password_hash=EXCLUDED.password_hash`,
+       ON CONFLICT (id) DO NOTHING`,
       [id, phone, name, role, hash],
     );
   }
@@ -483,11 +542,22 @@ async function login(request, response) {
   const expectedRole = String(body.expected_role || "");
   if (!["member", "coach", "admin"].includes(expectedRole)) return json(response, 400, { error: "登录入口无效，请从对应角色入口重新登录" });
   if (!/^1\d{10}$/.test(phone) || password.length < 8 || password.length > 128) return json(response, 400, { error: "手机号或密码格式不正确" });
+  const clientIp = String(request.socket?.remoteAddress || "unknown");
+  if (rateLimited(`login:${phone}|${clientIp}`, RATE_WINDOW_MS, 10)) {
+    return json(response, 429, { error: "尝试次数过多，请 15 分钟后再试" });
+  }
   const result = await pool.query("SELECT id,name,role,password_hash,status FROM users WHERE phone=$1 LIMIT 1", [phone]);
   const user = result.rows[0];
   const valid = user && user.status === "active" && await bcrypt.compare(password, user.password_hash);
   if (!valid) {
     await new Promise((resolve) => setTimeout(resolve, 350));
+    console.log(JSON.stringify({
+      level: "warn",
+      event: "login_failed",
+      phone: phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2"),
+      ip: clientIp,
+      role: expectedRole,
+    }));
     return json(response, 401, { error: "手机号或密码错误" });
   }
   if (user.role !== expectedRole) {
@@ -514,6 +584,10 @@ async function register(request, response) {
   }
   if (password !== confirmPassword) return json(response, 400, { error: "两次输入的密码不一致" });
   if (!acceptedTerms) return json(response, 400, { error: "请先阅读并同意用户协议与隐私政策" });
+  const clientIp = String(request.socket?.remoteAddress || "unknown");
+  if (rateLimited(`register:${clientIp}`, RATE_WINDOW_MS, 5)) {
+    return json(response, 429, { error: "注册过于频繁，请稍后再试" });
+  }
 
   const id = `member-${randomUUID()}`;
   const passwordHash = await bcrypt.hash(password, 12);
@@ -598,6 +672,10 @@ async function readSession(request) {
   try {
     const { payload } = await jwtVerify(token, sessionSecret, { algorithms: ["HS256"] });
     if (payload.role !== requestedRole) return null;
+    // 回查数据库：停用/降权/删除的账号立即失效，不再等到 12 小时令牌过期。
+    const result = await pool.query("SELECT role,status FROM users WHERE id=$1", [payload.sub]);
+    const user = result.rows[0];
+    if (!user || user.status !== "active" || user.role !== payload.role) return null;
     return { id: payload.sub, role: payload.role, name: payload.name };
   } catch {
     return null;
@@ -671,11 +749,12 @@ async function createUser(request, response, session) {
 async function handleAction(request, response, session) {
   const { action, payload = {} } = await readJson(request);
   const managementAction = String(action || "").startsWith("coach_");
+  const memberScopedAction = managementAction || action === "suggestion";
   if (managementAction && session.role !== "coach") {
     return json(response, 403, { error: "仅教练可修改会员服务内容" });
   }
   const requestedMemberId = String(payload.member_id || "").trim();
-  if (managementAction && !requestedMemberId) {
+  if (memberScopedAction && !requestedMemberId) {
     return json(response, 400, { error: "必须提供精确 member_id" });
   }
   const userId = session.role === "member" ? session.id : (requestedMemberId || "member-li");
@@ -1154,11 +1233,24 @@ async function updateUser(request, response, session) {
   if (!id || !["member", "coach", "admin"].includes(role) || !["active", "disabled"].includes(status)) {
     return json(response, 400, { error: "账户参数无效" });
   }
+  const target = await pool.query("SELECT id,role,status FROM users WHERE id=$1", [id]);
+  if (!target.rows[0]) return json(response, 404, { error: "找不到该账户" });
+  const current = target.rows[0];
+  const deactivating = current.status === "active" && status === "disabled";
+  const demotingAdmin = current.role === "admin" && role !== "admin";
+  if (id === session.id && (deactivating || demotingAdmin)) {
+    return json(response, 400, { error: "不能停用或降级当前登录的管理员账号" });
+  }
+  if (current.role === "admin" && (deactivating || demotingAdmin)) {
+    const adminCount = await pool.query("SELECT COUNT(*)::int AS count FROM users WHERE role='admin' AND status='active'");
+    if (Number(adminCount.rows[0].count) <= 1) {
+      return json(response, 400, { error: "必须至少保留一个可用的管理员账号" });
+    }
+  }
   const result = await pool.query(
     "UPDATE users SET role=$2,status=$3 WHERE id=$1 RETURNING id,name,phone,role,status",
     [id, role, status],
   );
-  if (!result.rows[0]) return json(response, 404, { error: "找不到该账户" });
   await audit(session.id, "user_update", { id, role, status });
   return json(response, 200, {
     user: {
