@@ -219,10 +219,24 @@ systemd-run --quiet --collect --service-type=exec --unit "$web_unit" \
   --setenv=NODE_ENV=production --setenv=HOSTNAME=127.0.0.1 --setenv=PORT=3300 \
   /usr/bin/node "$release_dir/web/server.js"
 
-wait_for_runtime http://127.0.0.1:3300 http://127.0.0.1:8988
-bash "$release_dir/scripts/release-health-check.sh" \
+dump_candidate_logs() {
+  # 候选未就绪时输出启动日志用于远程诊断；只显示变量名，禁止泄露任何秘密值。
+  echo "候选进程日志（已脱敏）：" >&2
+  journalctl -u "$api_unit" -u "$web_unit" -n 80 --no-pager --output=cat 2>/dev/null \
+    | sed -E 's/(password|passwd|secret|token|api[_-]?key|aes[_-]?key|session[_-]?secret|corp[_-]?id)[=: ]+[^ ,"'"'"'}]+/\1=[REDACTED]/gi' \
+    | tail -n 80 >&2 || true
+}
+
+if ! wait_for_runtime http://127.0.0.1:3300 http://127.0.0.1:8988; then
+  dump_candidate_logs
+  exit 1
+fi
+if ! bash "$release_dir/scripts/release-health-check.sh" \
   --web-base http://127.0.0.1:3300 \
-  --api-base http://127.0.0.1:8988
+  --api-base http://127.0.0.1:8988; then
+  dump_candidate_logs
+  exit 1
+fi
 stop_candidates
 
 if [[ -L "$base_dir/current" ]]; then
