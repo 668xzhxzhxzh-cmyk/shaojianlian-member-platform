@@ -109,7 +109,16 @@ test("monthly quota defers only after the calendar-month allowance is exhausted"
   };
 
   try {
-    const pool = messagePool(31);
+    // 月度配额上限 = 当前中国时区日历月的天数；测试随月份动态计算，避免 30/31 天月份导致误报。
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const daysInChinaMonth = new Date(Date.UTC(Number(values.year), Number(values.month), 0)).getUTCDate();
+
+    const pool = messagePool(daysInChinaMonth);
     const service = createWecomContactService({ pool });
     const result = await service.createCustomerMessage({
       memberId: "member-1",
@@ -120,7 +129,7 @@ test("monthly quota defers only after the calendar-month allowance is exhausted"
     });
 
     assert.equal(result.task.status, "frequency_deferred");
-    assert.match(result.task.provider_message, /本月 31 条/);
+    assert.match(result.task.provider_message, new RegExp(`本月 ${daysInChinaMonth} 条`));
     assert.match(result.instruction, /下一可发送窗口/);
   } finally {
     globalThis.fetch = originalFetch;
