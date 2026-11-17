@@ -6,6 +6,15 @@
 
 当时仍采用 `/opt/shao-coach` 原位更新，只备份了 `.next` 与 `node_modules`。生产现状已通过只读审计记录在 `.agents/skills/safe-web-release/references/deployment-flow.md`。
 
+## 域名与 HTTPS 切换（IP 验收完成后）
+
+1. DNS 服务商添加 A 记录，把已备案域名指向 ECS 公网 IP。
+2. 用 `deployment/nginx-domain.conf` 作为模板（替换域名占位符）生成正式配置，`nginx -t` 通过后 `systemctl reload nginx`。
+3. 安装证书（推荐 certbot 自动续期）：`certbot --nginx -d 域名`；若用阿里云免费证书则手动填写证书路径。
+4. 更新服务器环境：`/opt/shao-coach/.env` 的 `SITE_ADDRESS`/`PUBLIC_URL` 改为 `https://域名`、`COOKIE_SECURE=true`；`/etc/default/shao-coach-web` 的 `NEXT_PUBLIC_SITE_URL` 同步更新。
+5. 企业微信自建应用回调 URL 与可信 IP 同步更新为 `https://域名/api/wecom/callback`。
+6. 验证：`curl -I https://域名/health` 返回 200，且带 HSTS/CSP 安全头；公网 `http://域名` 301 跳转 HTTPS。
+
 ## 今后的正常更新顺序
 
 1. 在独立 Git 分支修改代码。
