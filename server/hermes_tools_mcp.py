@@ -295,6 +295,20 @@ def list_customer_ids() -> dict[str, Any]:
 
 
 @mcp.tool()
+def create_member_binding_qr(member_id: str) -> dict[str, Any]:
+    """为精确 member_id 生成企业微信客户联系专属二维码。
+
+    会员用普通微信扫码添加教练后，企业微信官方回调会自动绑定
+    member_id、external_userid 与当前教练 userid；禁止按昵称匹配。
+    """
+
+    return _call(
+        "create_member_binding_qr",
+        member_id=member_id,
+    )
+
+
+@mcp.tool()
 def bind_member_external_userid(
     member_id: str,
     external_userid: str,
@@ -325,6 +339,32 @@ def create_member_message_draft(
     return _call(
         "create_message_draft",
         member_id=member_id,
+        title=title,
+        content=content,
+    )
+
+
+@mcp.tool()
+def create_member_message(
+    member_id: str,
+    kind: str,
+    title: str,
+    content: str,
+) -> dict[str, Any]:
+    """创建经过服务端策略校验的会员客户消息。
+
+    kind 仅可用于已确定事实的日常提醒：course_reminder、
+    booking_confirmation、checkin_reminder、hydration_reminder、
+    meal_log_reminder、membership_expiry_reminder。
+    这些消息无需教练在聊天中二次审批，会直接创建企业微信发送任务，
+    但仍须教练在企业微信客户端确认。涉及训练、饮食、伤痛、费用、
+    取消或改期等判断时，服务端会强制降级为待教练确认草稿。
+    """
+
+    return _call(
+        "create_customer_message",
+        member_id=member_id,
+        kind=kind,
         title=title,
         content=content,
     )

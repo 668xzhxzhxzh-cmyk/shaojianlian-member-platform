@@ -82,6 +82,8 @@ sudo sh scripts/install-hermes-wecom-tools.sh /opt/shao-coach
 
 然后把 `deployment/hermes-wecom-mcp.example.yaml` 合并到 Hermes `config.yaml`，将同一个 MCP 启用到网站使用的 `api_server` 和 Hermes Desktop 使用的 `cli` 平台，并验证：
 
+`deepseek-v4-flash` 的 `model.context_length` 必须配置为 `1000000`；若误设为过小值，Hermes 会在调用 MCP 前拒绝执行任务。
+
 ```bash
 sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes mcp test shao-coach
 sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes tools --summary

@@ -1,4 +1,5 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { classifyCustomerMessage } from "./message-policy.mjs";
 
 const WECOM_API_ORIGIN = "https://qyapi.weixin.qq.com";
 const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -8,6 +9,7 @@ export function createWecomContactService({ pool }) {
   const corpId = String(process.env.WECOM_CORP_ID || "").trim();
   const contactSecret = String(process.env.WECOM_CONTACT_SECRET || process.env.WECOM_APP_SECRET || "").trim();
   const toolToken = String(process.env.HERMES_TOOL_TOKEN || "").trim();
+  const groupSendRule = normalizeWecomGroupSendRule(process.env.WECOM_GROUP_SEND_RULE);
   const allowedCoachUserIds = new Set(
     String(process.env.WECOM_ALLOWED_COACH_USERIDS || "")
       .split(",")
@@ -76,6 +78,10 @@ export function createWecomContactService({ pool }) {
       const customers = await listCustomerIds(coachUserId);
       return sendJson(response, 200, { customers });
     }
+    if (operation === "create_member_binding_qr") {
+      const bindingQr = await createMemberBindingQr(body.member_id, coachUserId);
+      return sendJson(response, 201, { binding_qr: bindingQr });
+    }
     if (operation === "bind_member_external_userid") {
       const binding = await bindMemberExternalUserId(
         body.member_id,
@@ -93,8 +99,19 @@ export function createWecomContactService({ pool }) {
       });
       return sendJson(response, 201, {
         task,
-        instruction: `草稿已创建。若确认内容无误，请回复：确认发送 task_id=${task.task_id}`,
+        instruction: "草稿已创建。若内容无误，请直接回复：确认发送。系统会在后台安全关联本次任务。",
       });
+    }
+    if (operation === "create_customer_message") {
+      const delivery = await createCustomerMessage({
+        memberId: body.member_id,
+        coachUserId,
+        kind: body.kind,
+        title: body.title,
+        content: body.content,
+        sourceKey: body.source_key,
+      });
+      return sendJson(response, 201, delivery);
     }
     if (operation === "confirm_customer_send_task") {
       if (String(body.confirmation || "").trim() !== "确认发送") {
@@ -103,7 +120,9 @@ export function createWecomContactService({ pool }) {
       const task = await confirmCustomerSendTask(body.task_id, coachUserId);
       return sendJson(response, 200, {
         task,
-        message: "发送任务已创建，请在企业微信客户端确认发送。",
+        message: task.status === "frequency_deferred"
+          ? "当前企业微信群发周期额度已用完，任务未发送并已进入等待队列。"
+          : "发送任务已创建，请在企业微信客户端确认发送。",
       });
     }
     if (operation === "get_send_task_status") {
@@ -111,6 +130,24 @@ export function createWecomContactService({ pool }) {
       return sendJson(response, 200, { task });
     }
     return sendJson(response, 400, { error: "不支持的 AI 管理工具操作" });
+  }
+
+  async function executeCoachOperation(body) {
+    const operation = String(body?.operation || "");
+    const coachUserId = requireCoachUserId(body?.coach_userid);
+    if (operation === "get_member_by_id") {
+      return { member: await getMemberById(body.member_id, coachUserId) };
+    }
+    if (operation === "add_private_session") {
+      return addPrivateSession(body, coachUserId);
+    }
+    if (operation === "update_private_session") {
+      return updatePrivateSession(body, coachUserId);
+    }
+    if (operation === "delete_private_session") {
+      return deletePrivateSession(body, coachUserId);
+    }
+    throw publicError(400, "该操作不支持 Hermes 确定性快速通道");
   }
 
   async function getMemberById(rawMemberId, coachUserId) {
@@ -203,21 +240,28 @@ export function createWecomContactService({ pool }) {
     if (!/^\d{1,2}\/\d{1,2}$/.test(rawDate) || !/^\d{2}:\d{2}[–-]\d{2}:\d{2}$/.test(time)) {
       throw publicError(400, "课程日期或时间格式无效");
     }
+    const date = rawDate.split("/").map((part) => Number(part)).join("/");
+    const normalizedTime = time.replace("-", "–");
     const requestId = String(body.request_id || "").trim().replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
     const bookingId = requestId ? `hermes-booking-${requestId}` : `hermes-booking-${randomUUID()}`;
-    const existing = (Array.isArray(state.bookings) ? state.bookings : []).find((item) => item.id === bookingId);
+    const bookings = Array.isArray(state.bookings) ? state.bookings : [];
+    const existing = bookings.find((item) => item.id === bookingId || (
+      item.date === date
+      && String(item.time || "").replace("-", "–") === normalizedTime
+      && item.focus === focus
+    ));
     if (existing) return { changed: false, member_id: memberId, booking: existing, idempotent_replay: true, sync: "课程已存在，未重复创建" };
     const booking = {
       id: bookingId,
       day,
-      date: rawDate,
-      time,
+      date,
+      time: normalizedTime,
       title: "一对一私教",
       coach: "邵教练",
       focus,
       status: ["已预约", "待确认", "已完成"].includes(String(body.status)) ? String(body.status) : "已预约",
     };
-    state.bookings = [...(Array.isArray(state.bookings) ? state.bookings : []), booking];
+    state.bookings = [...bookings, booking];
     await saveMemberState(memberId, state, coachUserId, "hermes_private_session_added", { booking });
     return { changed: true, member_id: memberId, booking, sync: "网站页面已自动同步" };
   }
@@ -365,6 +409,205 @@ export function createWecomContactService({ pool }) {
     }));
   }
 
+  async function createMemberBindingQr(rawMemberId, coachUserId) {
+    requireContactConfigured();
+    const memberId = normalizeId(rawMemberId, "member_id");
+    const memberResult = await pool.query(
+      `SELECT u.id,u.name,u.status,b.coach_userid,b.external_userid
+       FROM users u
+       LEFT JOIN member_wecom_bindings b ON b.member_id=u.id AND b.status='active'
+       WHERE u.id=$1 AND u.role='member'
+       LIMIT 1`,
+      [memberId],
+    );
+    const member = memberResult.rows[0];
+    if (!member || member.status !== "active") throw publicError(404, "member_id 不存在或会员已停用");
+    if (member.coach_userid && member.coach_userid !== coachUserId) {
+      throw publicError(403, "该会员已归属其他教练");
+    }
+    if (member.external_userid) {
+      throw publicError(409, "该会员已完成企业微信绑定，无需重复生成二维码");
+    }
+
+    const stateToken = `sb_${randomBytes(15).toString("base64url")}`;
+    const expiresAt = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString();
+    const contactWay = await callWecom("/cgi-bin/externalcontact/add_contact_way", {
+      method: "POST",
+      body: {
+        type: 1,
+        scene: 2,
+        style: 1,
+        remark: "会员自动绑定",
+        skip_verify: true,
+        state: stateToken,
+        user: [coachUserId],
+      },
+    });
+    const qrCode = String(contactWay.qr_code || "").trim();
+    const configId = String(contactWay.config_id || "").trim();
+    if (!qrCode || !configId) throw publicError(502, "企业微信未返回可用的客户联系二维码");
+
+    const client = typeof pool.connect === "function" ? await pool.connect() : pool;
+    try {
+      if (client !== pool) await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO member_wecom_bindings (member_id,external_userid,coach_userid,status,updated_at)
+         VALUES ($1,NULL,$2,'active',NOW())
+         ON CONFLICT (member_id) DO UPDATE
+         SET coach_userid=EXCLUDED.coach_userid,status='active',updated_at=NOW()
+         WHERE member_wecom_bindings.external_userid IS NULL`,
+        [memberId, coachUserId],
+      );
+      await client.query(
+        `UPDATE wecom_binding_links
+         SET status='superseded',updated_at=NOW()
+         WHERE member_id=$1 AND coach_userid=$2 AND status='pending'`,
+        [memberId, coachUserId],
+      );
+      await client.query(
+        `INSERT INTO wecom_binding_links
+           (state_token,member_id,coach_userid,config_id,qr_code,status,expires_at)
+         VALUES ($1,$2,$3,$4,$5,'pending',$6)`,
+        [stateToken, memberId, coachUserId, configId, qrCode, expiresAt],
+      );
+      await auditOperation(coachUserId, "wecom_member_binding_qr_created", {
+        member_id: memberId,
+        config_id: configId,
+        expires_at: expiresAt,
+      }, client);
+      if (client !== pool) await client.query("COMMIT");
+    } catch (error) {
+      if (client !== pool) await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      if (client !== pool) client.release();
+    }
+
+    return {
+      member_id: memberId,
+      coach_userid: coachUserId,
+      qr_code: qrCode,
+      status: "pending",
+      expires_at: expiresAt,
+      instruction: "请让该会员使用普通微信扫描此专属二维码并添加教练，添加成功后网站会自动同步绑定。",
+    };
+  }
+
+  async function handleContactEvent(message) {
+    if (String(message?.msgType || "").toLowerCase() !== "event"
+      || String(message?.event || "").toLowerCase() !== "change_external_contact"
+      || String(message?.changeType || "").toLowerCase() !== "add_external_contact") {
+      return { ignored: true, reason: "unsupported_event" };
+    }
+    const coachUserId = requireCoachUserId(message.userId);
+    const externalUserId = normalizeId(message.externalUserId, "external_userid", 128);
+    const stateToken = String(message.state || "").trim();
+    if (!/^sb_[A-Za-z0-9_-]{20}$/.test(stateToken)) {
+      return { ignored: true, reason: "not_a_member_binding_qr" };
+    }
+
+    const linkResult = await pool.query(
+      `SELECT state_token,member_id,coach_userid,status,external_userid,expires_at
+       FROM wecom_binding_links
+       WHERE state_token=$1 AND coach_userid=$2
+       LIMIT 1`,
+      [stateToken, coachUserId],
+    );
+    const link = linkResult.rows[0];
+    if (!link) return { ignored: true, reason: "binding_link_not_found" };
+    if (link.status === "consumed" && link.external_userid === externalUserId) {
+      return { bound: true, idempotent_replay: true, member_id: link.member_id };
+    }
+    if (link.status !== "pending" || new Date(link.expires_at).getTime() <= Date.now()) {
+      return { ignored: true, reason: "binding_link_inactive" };
+    }
+
+    const customer = await callWecom(
+      `/cgi-bin/externalcontact/get?external_userid=${encodeURIComponent(externalUserId)}`,
+      { method: "GET" },
+    );
+    const followUsers = Array.isArray(customer.follow_user) ? customer.follow_user : [];
+    if (!followUsers.some((item) => String(item.userid || "") === coachUserId)) {
+      throw publicError(403, "新增客户事件未通过企业微信客户归属复核");
+    }
+
+    const client = typeof pool.connect === "function" ? await pool.connect() : pool;
+    try {
+      if (client !== pool) await client.query("BEGIN");
+      const lockedResult = await client.query(
+        `SELECT member_id,coach_userid,status,external_userid,expires_at
+         FROM wecom_binding_links
+         WHERE state_token=$1
+         FOR UPDATE`,
+        [stateToken],
+      );
+      const locked = lockedResult.rows[0];
+      if (!locked || locked.coach_userid !== coachUserId) {
+        throw publicError(404, "会员绑定二维码不存在");
+      }
+      if (locked.status === "consumed" && locked.external_userid === externalUserId) {
+        if (client !== pool) await client.query("COMMIT");
+        return { bound: true, idempotent_replay: true, member_id: locked.member_id };
+      }
+      if (locked.status !== "pending" || new Date(locked.expires_at).getTime() <= Date.now()) {
+        throw publicError(409, "会员绑定二维码已失效");
+      }
+      const existingResult = await client.query(
+        "SELECT member_id FROM member_wecom_bindings WHERE external_userid=$1 FOR UPDATE",
+        [externalUserId],
+      );
+      const existingMemberId = existingResult.rows[0]?.member_id;
+      if (existingMemberId && existingMemberId !== locked.member_id) {
+        throw publicError(409, "该企业微信客户已绑定其他 member_id");
+      }
+      const memberBindingResult = await client.query(
+        "SELECT external_userid FROM member_wecom_bindings WHERE member_id=$1 FOR UPDATE",
+        [locked.member_id],
+      );
+      const currentExternalUserId = memberBindingResult.rows[0]?.external_userid;
+      if (currentExternalUserId && currentExternalUserId !== externalUserId) {
+        throw publicError(409, "该 member_id 已绑定其他企业微信客户，禁止扫码覆盖");
+      }
+      await client.query(
+        `INSERT INTO member_wecom_bindings
+           (member_id,external_userid,coach_userid,status,updated_at)
+         VALUES ($1,$2,$3,'active',NOW())
+         ON CONFLICT (member_id) DO UPDATE
+         SET external_userid=EXCLUDED.external_userid,
+             coach_userid=EXCLUDED.coach_userid,
+             status='active',
+             updated_at=NOW()`,
+        [locked.member_id, externalUserId, coachUserId],
+      );
+      await client.query(
+        `UPDATE wecom_binding_links
+         SET status='consumed',external_userid=$2,consumed_at=NOW(),updated_at=NOW()
+         WHERE state_token=$1`,
+        [stateToken, externalUserId],
+      );
+      const syncedName = await syncOfficialCustomerName(client, locked.member_id, customer);
+      await auditOperation(coachUserId, "wecom_member_binding_auto_completed", {
+        member_id: locked.member_id,
+        external_userid: externalUserId,
+        official_name_synced: Boolean(syncedName),
+      }, client);
+      if (client !== pool) await client.query("COMMIT");
+      return {
+        bound: true,
+        member_id: locked.member_id,
+        external_userid: externalUserId,
+        coach_userid: coachUserId,
+        verified_via_wecom: true,
+        member_name: syncedName,
+      };
+    } catch (error) {
+      if (client !== pool) await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      if (client !== pool) client.release();
+    }
+  }
+
   async function bindMemberExternalUserId(rawMemberId, rawExternalUserId, coachUserId) {
     requireContactConfigured();
     const memberId = normalizeId(rawMemberId, "member_id");
@@ -395,19 +638,64 @@ export function createWecomContactService({ pool }) {
            updated_at=NOW()`,
       [memberId, externalUserId, coachUserId],
     );
+    await pool.query(
+      `UPDATE wecom_binding_links
+       SET status='superseded',updated_at=NOW()
+       WHERE member_id=$1 AND coach_userid=$2 AND status='pending'`,
+      [memberId, coachUserId],
+    );
+    const syncedName = await syncOfficialCustomerName(pool, memberId, customer);
     await auditOperation(coachUserId, "wecom_member_binding_verified", {
       member_id: memberId,
       external_userid: externalUserId,
+      official_name_synced: Boolean(syncedName),
     });
     return {
       member_id: memberId,
       external_userid: externalUserId,
       coach_userid: coachUserId,
       verified_via_wecom: true,
+      member_name: syncedName,
     };
   }
 
-  async function createMessageDraft({ memberId: rawMemberId, coachUserId, title, content }) {
+  async function syncOfficialCustomerName(database, memberId, customer) {
+    const officialName = String(customer?.external_contact?.name || "").trim();
+    const characterCount = Array.from(officialName).length;
+    if (!officialName || characterCount > 64) return null;
+
+    await database.query(
+      "UPDATE users SET name=$2 WHERE id=$1 AND role='member'",
+      [memberId, officialName],
+    );
+    const stateResult = await database.query(
+      "SELECT state_json FROM portal_state WHERE user_id=$1 FOR UPDATE",
+      [memberId],
+    );
+    if (stateResult.rows[0]?.state_json) {
+      const state = structuredClone(stateResult.rows[0].state_json);
+      state.profile = { ...(state.profile || {}), name: officialName };
+      if (Array.isArray(state.suggestions)) {
+        state.suggestions = state.suggestions.map((item) => ({ ...item, member: officialName }));
+      }
+      await database.query(
+        "UPDATE portal_state SET state_json=$2,updated_at=NOW() WHERE user_id=$1",
+        [memberId, state],
+      );
+    }
+    return officialName;
+  }
+
+  async function createMessageDraft({
+    memberId: rawMemberId,
+    coachUserId,
+    title,
+    content,
+    kind = "coach_decision",
+    approvalMode = "coach_required",
+    sourceKey = "",
+    scheduledFor = null,
+  }) {
     const memberId = normalizeId(rawMemberId, "member_id");
     const safeTitle = normalizeText(title, "标题", 80);
     const safeContent = normalizeText(content, "消息内容", 1800);
@@ -425,12 +713,23 @@ export function createWecomContactService({ pool }) {
       throw publicError(409, "会员尚未绑定 external_userid，不能创建发送草稿");
     }
     const taskId = randomUUID();
-    await pool.query(
+    const normalizedSourceKey = String(sourceKey || "").trim().slice(0, 240) || null;
+    const inserted = await pool.query(
       `INSERT INTO wecom_send_tasks
-         (id,member_id,external_userid,coach_userid,title,content,status)
-       VALUES ($1,$2,$3,$4,$5,$6,'draft')`,
-      [taskId, memberId, row.external_userid, coachUserId, safeTitle, safeContent],
+         (id,member_id,external_userid,coach_userid,title,content,status,message_kind,approval_mode,source_key,scheduled_for)
+       VALUES ($1,$2,$3,$4,$5,$6,'draft',$7,$8,$9,$10)
+       ON CONFLICT (source_key) WHERE source_key IS NOT NULL DO NOTHING
+       RETURNING id`,
+      [taskId, memberId, row.external_userid, coachUserId, safeTitle, safeContent, kind, approvalMode, normalizedSourceKey, scheduledFor],
     );
+    if (!inserted.rows[0] && normalizedSourceKey) {
+      const existing = await pool.query(
+        `SELECT id,member_id,title,content,status,provider_message,next_retry_at
+         FROM wecom_send_tasks WHERE source_key=$1 LIMIT 1`,
+        [normalizedSourceKey],
+      );
+      if (existing.rows[0]) return { ...publicTask(existing.rows[0]), title: existing.rows[0].title, content: existing.rows[0].content, idempotent_replay: true };
+    }
     await auditOperation(coachUserId, "wecom_message_draft_created", {
       task_id: taskId,
       member_id: memberId,
@@ -442,7 +741,44 @@ export function createWecomContactService({ pool }) {
       title: safeTitle,
       content: safeContent,
       status: "draft",
+      message_kind: kind,
+      approval_mode: approvalMode,
       member_received: false,
+    };
+  }
+
+  async function createCustomerMessage({ memberId, coachUserId, kind, title, content, sourceKey = "", scheduledFor = null }) {
+    const policy = classifyCustomerMessage({ kind, title, content });
+    const task = await createMessageDraft({
+      memberId,
+      coachUserId,
+      title,
+      content,
+      kind: policy.kind,
+      approvalMode: policy.approvalMode,
+      sourceKey,
+      scheduledFor,
+    });
+    if (task.idempotent_replay) {
+      return { task, policy, instruction: "相同消息任务已存在，未重复创建。" };
+    }
+    if (policy.approvalMode === "coach_required") {
+      return {
+        task,
+        policy,
+        instruction: "该消息涉及教练判断，已保存为草稿；请确认内容后再发送。",
+      };
+    }
+
+    const confirmed = await confirmCustomerSendTask(task.task_id, coachUserId);
+    return {
+      task: confirmed,
+      policy,
+      instruction: confirmed.status === "frequency_deferred"
+        ? (confirmed.next_retry_at
+            ? "当前群发周期额度已用完，日常消息已排入下一可发送窗口。"
+            : "当前群发周期额度已用完，且下个窗口晚于课程时间，请教练从客户会话手动提醒。")
+        : "日常消息无需聊天内二次审批。发送任务已创建，请在企业微信客户端确认发送。",
     };
   }
 
@@ -451,10 +787,11 @@ export function createWecomContactService({ pool }) {
     const taskId = normalizeUuid(rawTaskId, "task_id");
     const client = await pool.connect();
     let task;
+    let deferredTask = null;
     try {
       await client.query("BEGIN");
       const result = await client.query(
-        `SELECT id,member_id,external_userid,coach_userid,title,content,status
+        `SELECT id,member_id,external_userid,coach_userid,title,content,status,scheduled_for
          FROM wecom_send_tasks
          WHERE id=$1 AND coach_userid=$2
          FOR UPDATE`,
@@ -465,10 +802,43 @@ export function createWecomContactService({ pool }) {
       if (task.status !== "draft") {
         throw publicError(409, "该草稿已处理，不能重复创建发送任务");
       }
-      await client.query(
-        "UPDATE wecom_send_tasks SET status='creating_task',confirmed_at=NOW() WHERE id=$1",
-        [taskId],
+      const quota = getWecomQuotaWindow(groupSendRule);
+      const quotaUsage = await client.query(
+        `SELECT COUNT(*)::int AS used
+         FROM wecom_send_tasks
+         WHERE external_userid=$1
+           AND id<>$2
+           AND created_at >= $3
+           AND created_at < $4
+           AND status IN ('creating_task','awaiting_coach_confirmation','wecom_reported_sent')`,
+        [task.external_userid, taskId, quota.windowStart, quota.windowEnd],
       );
+      const used = Number(quotaUsage.rows[0]?.used || 0);
+      if (used >= quota.limit) {
+        const nextRetryAt = !task.scheduled_for || new Date(task.scheduled_for).getTime() > quota.nextRetryAt.getTime()
+          ? quota.nextRetryAt
+          : null;
+        await client.query(
+          `UPDATE wecom_send_tasks
+           SET status='frequency_deferred',
+               provider_message=$2,provider_updated_at=NOW(),next_retry_at=$3
+           WHERE id=$1`,
+          [taskId, `${quota.label}的客户接收额度已用完，未调用企业微信`, nextRetryAt],
+        );
+        deferredTask = {
+          task_id: taskId,
+          member_id: task.member_id,
+          status: "frequency_deferred",
+          provider_message: `${quota.label}的客户接收额度已用完，未调用企业微信`,
+          next_retry_at: nextRetryAt,
+          member_received: false,
+        };
+      } else {
+        await client.query(
+          "UPDATE wecom_send_tasks SET status='creating_task',confirmed_at=NOW() WHERE id=$1",
+          [taskId],
+        );
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -476,6 +846,8 @@ export function createWecomContactService({ pool }) {
     } finally {
       client.release();
     }
+
+    if (deferredTask) return deferredTask;
 
     try {
       const result = await callWecom("/cgi-bin/externalcontact/add_msg_template", {
@@ -532,7 +904,7 @@ export function createWecomContactService({ pool }) {
     requireContactConfigured();
     const taskId = normalizeUuid(rawTaskId, "task_id");
     const result = await pool.query(
-      `SELECT id,member_id,external_userid,coach_userid,status,wecom_msgid,provider_message
+      `SELECT id,member_id,external_userid,coach_userid,status,wecom_msgid,provider_message,next_retry_at,delivered_at,scheduled_for
        FROM wecom_send_tasks WHERE id=$1 AND coach_userid=$2 LIMIT 1`,
       [taskId, coachUserId],
     );
@@ -561,17 +933,26 @@ export function createWecomContactService({ pool }) {
           ? "failed_frequency_limit"
           : "awaiting_coach_confirmation";
     const providerMessage = providerStatus === 1
-      ? "企业微信报告教练已执行发送"
+      ? "企业微信已报告发送成功（不代表会员已读）"
       : providerStatus === 2
         ? "客户不是教练好友，发送失败"
         : providerStatus === 3
           ? "客户已收到其他群发消息，发送失败"
           : "等待企业微信客户端确认";
+    const nextWindow = getWecomQuotaWindow(groupSendRule).nextRetryAt;
+    const nextRetryAt = providerStatus === 3
+      && (!task.scheduled_for || new Date(task.scheduled_for).getTime() > nextWindow.getTime())
+      ? nextWindow
+      : null;
     await pool.query(
       `UPDATE wecom_send_tasks
-       SET status=$2,provider_message=$3,provider_updated_at=NOW()
+       SET status=$2,
+           provider_message=$3,
+           provider_updated_at=NOW(),
+           next_retry_at=$4,
+           delivered_at=CASE WHEN $2='wecom_reported_sent' THEN COALESCE(delivered_at,NOW()) ELSE delivered_at END
        WHERE id=$1`,
-      [taskId, nextStatus, providerMessage],
+      [taskId, nextStatus, providerMessage, nextRetryAt],
     );
     await auditOperation(coachUserId, "wecom_send_task_status_checked", {
       task_id: taskId,
@@ -583,8 +964,88 @@ export function createWecomContactService({ pool }) {
       member_id: task.member_id,
       status: nextStatus,
       provider_message: providerMessage,
-      member_received: false,
+      member_received: providerStatus === 1,
+      member_read: false,
+      next_retry_at: nextRetryAt,
     };
+  }
+
+  async function reconcileSendTasks({ notifyCoach = async () => {} } = {}) {
+    if (!contactConfigured) return { skipped: "wecom_contact_not_configured", checked: 0, retries: 0 };
+
+    const pending = await pool.query(
+      `SELECT id,coach_userid
+       FROM wecom_send_tasks
+       WHERE status='awaiting_coach_confirmation'
+         AND wecom_msgid IS NOT NULL
+       ORDER BY provider_updated_at NULLS FIRST
+       LIMIT 100`,
+    );
+    let checked = 0;
+    for (const task of pending.rows) {
+      try {
+        const current = await syncSendTaskStatus(task.id, task.coach_userid);
+        checked += 1;
+        if (current.status === "wecom_reported_sent") {
+          await notifyCoach(task.coach_userid, "会员消息已由企业微信报告发送成功；系统不会把“已发送”误写成“已读”。");
+        } else if (current.status === "failed_frequency_limit") {
+          await notifyCoach(task.coach_userid, current.next_retry_at
+            ? "本次会员提醒被企业微信接收频率限制拦截，会员未收到。系统已安排到下一可发送窗口自动重建任务。"
+            : "本次课程提醒被企业微信接收频率限制拦截，会员未收到，且下个窗口已晚于课程时间。请从客户会话手动提醒。");
+        } else if (current.status === "failed_not_friend") {
+          await notifyCoach(task.coach_userid, "本次会员提醒发送失败：客户已不是当前教练的企业微信好友。请先恢复客户联系后再发送。");
+        }
+      } catch (error) {
+        await auditOperation(task.coach_userid, "wecom_send_task_reconcile_failed", {
+          error: String(error?.message || error).slice(0, 240),
+        });
+      }
+    }
+
+    const due = await pool.query(
+      `SELECT t.id,t.member_id,t.external_userid,t.coach_userid,t.title,t.content,t.message_kind,t.approval_mode,t.scheduled_for,u.name AS member_name
+       FROM wecom_send_tasks t
+       JOIN users u ON u.id=t.member_id
+       WHERE t.status IN ('failed_frequency_limit','frequency_deferred')
+         AND t.next_retry_at IS NOT NULL
+         AND t.next_retry_at <= NOW()
+         AND (t.scheduled_for IS NULL OR t.scheduled_for > NOW())
+         AND NOT EXISTS (SELECT 1 FROM wecom_send_tasks child WHERE child.retry_of=t.id)
+       ORDER BY t.next_retry_at
+       LIMIT 50`,
+    );
+    let retries = 0;
+    for (const original of due.rows) {
+      const retryId = randomUUID();
+      try {
+        const inserted = await pool.query(
+          `INSERT INTO wecom_send_tasks
+             (id,member_id,external_userid,coach_userid,title,content,status,retry_of,message_kind,approval_mode,scheduled_for)
+           VALUES ($1,$2,$3,$4,$5,$6,'draft',$7,$8,$9,$10)
+           ON CONFLICT DO NOTHING
+           RETURNING id`,
+          [retryId, original.member_id, original.external_userid, original.coach_userid, original.title, original.content, original.id, original.message_kind, original.approval_mode, original.scheduled_for],
+        );
+        if (!inserted.rows[0]) continue;
+        const confirmed = await confirmCustomerSendTask(retryId, original.coach_userid);
+        if (confirmed.status === "awaiting_coach_confirmation") {
+          retries += 1;
+          await notifyCoach(original.coach_userid, `“${original.member_name}”的提醒已进入新的发送窗口。发送任务已创建，请在企业微信客户端确认发送。`);
+        }
+        await auditOperation(original.coach_userid, "wecom_frequency_retry_task_created", {
+          task_id: retryId,
+          member_id: original.member_id,
+          retry_of: original.id,
+        });
+      } catch (error) {
+        await auditOperation(original.coach_userid, "wecom_frequency_retry_failed", {
+          member_id: original.member_id,
+          error: String(error?.message || error).slice(0, 240),
+        });
+      }
+    }
+
+    return { checked, retries };
   }
 
   function requireCoachUserId(rawCoachUserId) {
@@ -641,8 +1102,8 @@ export function createWecomContactService({ pool }) {
     return accessToken;
   }
 
-  async function auditOperation(coachUserId, action, detail) {
-    await pool.query(
+  async function auditOperation(coachUserId, action, detail, database = pool) {
+    await database.query(
       "INSERT INTO audit_log (id,actor_id,action,detail) VALUES ($1,$2,$3,$4)",
       [randomUUID(), `wecom:${coachUserId}`, action, detail],
     );
@@ -651,7 +1112,90 @@ export function createWecomContactService({ pool }) {
   return {
     contactConfigured,
     toolsConfigured,
+    executeCoachOperation,
+    handleContactEvent,
     handleInternalTool,
+    createCustomerMessage,
+    reconcileSendTasks,
+  };
+}
+
+export function nextChinaMorning(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const midnightUtc = Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), 16, 0, 0, 0);
+  return new Date(midnightUtc + 9 * 60 * 60 * 1000);
+}
+
+export function chinaDayStart(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), -8, 0, 0, 0));
+}
+
+export function normalizeWecomGroupSendRule(value) {
+  const normalized = String(value || "daily").trim().toLowerCase();
+  return new Set(["daily", "weekly", "monthly"]).has(normalized) ? normalized : "daily";
+}
+
+export function getWecomQuotaWindow(rule, now = new Date()) {
+  const normalizedRule = normalizeWecomGroupSendRule(rule);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const year = Number(values.year);
+  const monthIndex = Number(values.month) - 1;
+  const day = Number(values.day);
+  const chinaMidnightUtc = Date.UTC(year, monthIndex, day, -8, 0, 0, 0);
+
+  if (normalizedRule === "monthly") {
+    const limit = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+    return {
+      rule: normalizedRule,
+      limit,
+      windowStart: new Date(Date.UTC(year, monthIndex, 1, -8, 0, 0, 0)),
+      windowEnd: new Date(Date.UTC(year, monthIndex + 1, 1, -8, 0, 0, 0)),
+      nextRetryAt: new Date(Date.UTC(year, monthIndex + 1, 1, 1, 0, 0, 0)),
+      label: `本月 ${limit} 条`,
+    };
+  }
+
+  if (normalizedRule === "weekly") {
+    const weekday = new Date(Date.UTC(year, monthIndex, day)).getUTCDay();
+    const daysSinceMonday = (weekday + 6) % 7;
+    const windowStartMs = chinaMidnightUtc - daysSinceMonday * 24 * 60 * 60 * 1000;
+    return {
+      rule: normalizedRule,
+      limit: 7,
+      windowStart: new Date(windowStartMs),
+      windowEnd: new Date(windowStartMs + 7 * 24 * 60 * 60 * 1000),
+      nextRetryAt: new Date(windowStartMs + 7 * 24 * 60 * 60 * 1000 + 9 * 60 * 60 * 1000),
+      label: "本周 7 条",
+    };
+  }
+
+  return {
+    rule: normalizedRule,
+    limit: 1,
+    windowStart: new Date(chinaMidnightUtc),
+    windowEnd: new Date(chinaMidnightUtc + 24 * 60 * 60 * 1000),
+    nextRetryAt: nextChinaMorning(now),
+    label: "今日 1 条",
   };
 }
 
@@ -715,7 +1259,9 @@ function publicTask(task) {
     member_id: task.member_id,
     status: task.status,
     provider_message: task.provider_message || null,
-    member_received: false,
+    member_received: task.status === "wecom_reported_sent",
+    member_read: false,
+    next_retry_at: task.next_retry_at || null,
   };
 }
 

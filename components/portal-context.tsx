@@ -15,10 +15,12 @@ import {
   type PortalState,
   type TrainingPlan,
 } from "@/lib/portal-data";
+import { portalFetch, type SessionRole } from "@/lib/portal-auth";
 
 type Toast = { id: number; message: string; tone: "success" | "info" | "warning" };
 
 type PortalContextValue = {
+  role: SessionRole;
   state: PortalState;
   loading: boolean;
   toasts: Toast[];
@@ -39,9 +41,9 @@ type PortalContextValue = {
 
 const PortalContext = createContext<PortalContextValue | null>(null);
 
-async function persist(action: string, payload: Record<string, unknown>) {
+async function persist(role: SessionRole, action: string, payload: Record<string, unknown>) {
   try {
-    const response = await fetch("/api/actions", {
+    const response = await portalFetch("/api/actions", role, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, payload }),
@@ -57,7 +59,7 @@ async function persist(action: string, payload: Record<string, unknown>) {
   }
 }
 
-export function PortalProvider({ children }: { children: React.ReactNode }) {
+export function PortalProvider({ children, role }: { children: React.ReactNode; role: SessionRole }) {
   const [state, setState] = useState<PortalState>(demoState);
   const [loading, setLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -66,7 +68,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       const query = memberId ? `?member_id=${encodeURIComponent(memberId)}` : "";
-      const response = await fetch(`/api/data${query}`, { credentials: "include" });
+      const response = await portalFetch(`/api/data${query}`, role);
       if (!response.ok) return;
       const result = await response.json() as { state?: PortalState };
       if (result.state) setState(result.state);
@@ -75,7 +77,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [role]);
 
   const notify = useCallback(
     (message: string, tone: Toast["tone"] = "success") => {
@@ -94,10 +96,10 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         ...current,
         waterMl: Math.min(3500, current.waterMl + amount),
       }));
-      void persist("water", { amount });
+      void persist(role, "water", { amount });
       notify(`已记录 ${amount} ml 饮水`);
     },
-    [notify],
+    [notify, role],
   );
 
   const toggleMeal = useCallback(
@@ -108,10 +110,10 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
           meal.id === id ? { ...meal, completed: !meal.completed } : meal,
         ),
       }));
-      void persist("meal", { id });
+      void persist(role, "meal", { id });
       notify("用餐记录已更新");
     },
-    [notify],
+    [notify, role],
   );
 
   const checkIn = useCallback(() => {
@@ -130,9 +132,9 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         streak: current.streak + 1,
       };
     });
-    void persist("checkin", { date: today });
+    void persist(role, "checkin", { date: today });
     notify("今日打卡成功，继续保持！");
-  }, [notify]);
+  }, [notify, role]);
 
   const saveBodyMetric = useCallback(
     (metric: { weight: number; bodyFat: number; muscle: number; waist: number }) => {
@@ -148,10 +150,10 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         ...current,
         bodyMetrics: [...current.bodyMetrics, item],
       }));
-      void persist("body", item);
+      void persist(role, "body", item);
       notify("身体数据已保存");
     },
-    [notify],
+    [notify, role],
   );
 
   const addCoachBooking = useCallback(
@@ -161,10 +163,10 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         ...current,
         bookings: [...current.bookings, item],
       }));
-      void persist("coach_booking_add", { member_id: state.profile.id, booking: item });
+      void persist(role, "coach_booking_add", { member_id: state.profile.id, booking: item });
       notify(`${booking.date} ${booking.time} 的私教课已加入排期`);
     },
-    [notify, state.profile.id],
+    [notify, role, state.profile.id],
   );
 
   const deleteCoachBooking = useCallback(
@@ -173,28 +175,28 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         ...current,
         bookings: current.bookings.filter((booking) => booking.id !== id),
       }));
-      void persist("coach_booking_delete", { member_id: state.profile.id, id });
+      void persist(role, "coach_booking_delete", { member_id: state.profile.id, id });
       notify("该节私教课已从排期删除");
     },
-    [notify, state.profile.id],
+    [notify, role, state.profile.id],
   );
 
   const saveTrainingPlan = useCallback(
     (plan: TrainingPlan) => {
       setState((current) => ({ ...current, trainingPlan: plan }));
-      void persist("coach_training_plan", { member_id: state.profile.id, plan });
+      void persist(role, "coach_training_plan", { member_id: state.profile.id, plan });
       notify(`${state.profile.name} 的训练方案已保存并发布`);
     },
-    [notify, state.profile.id, state.profile.name],
+    [notify, role, state.profile.id, state.profile.name],
   );
 
   const saveNutritionPlan = useCallback(
     (plan: NutritionPlan) => {
       setState((current) => ({ ...current, nutritionPlan: plan }));
-      void persist("coach_nutrition_plan", { member_id: state.profile.id, plan });
+      void persist(role, "coach_nutrition_plan", { member_id: state.profile.id, plan });
       notify(`${state.profile.name} 的饮食方案已保存并发布`);
     },
-    [notify, state.profile.id, state.profile.name],
+    [notify, role, state.profile.id, state.profile.name],
   );
 
   const saveBodyFeedback = useCallback(
@@ -205,19 +207,19 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         date: new Date().toISOString().slice(0, 10),
       };
       setState((current) => ({ ...current, bodyFeedbacks: [...(current.bodyFeedbacks ?? []), item] }));
-      void persist("coach_body_feedback", { member_id: state.profile.id, feedback: item });
+      void persist(role, "coach_body_feedback", { member_id: state.profile.id, feedback: item });
       notify(`${state.profile.name} 的身体反馈已保存并发布`);
     },
-    [notify, state.profile.id, state.profile.name],
+    [notify, role, state.profile.id, state.profile.name],
   );
 
   const updateMemberProfile = useCallback(
     (profile: Partial<PortalState["profile"]>) => {
       setState((current) => ({ ...current, profile: { ...current.profile, ...profile } }));
-      void persist("coach_member_profile", { member_id: state.profile.id, profile });
+      void persist(role, "coach_member_profile", { member_id: state.profile.id, profile });
       notify("会员档案已更新");
     },
-    [notify, state.profile.id],
+    [notify, role, state.profile.id],
   );
 
   const updateSuggestion = useCallback(
@@ -228,14 +230,15 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
           suggestion.id === id ? { ...suggestion, status } : suggestion,
         ),
       }));
-      void persist("suggestion", { id, status });
+      void persist(role, "suggestion", { id, status });
       if (!options?.silent) notify(status === "已发送" ? "发送任务已创建，请在企业微信客户端确认发送。" : "建议状态已更新");
     },
-    [notify],
+    [notify, role],
   );
 
   const value = useMemo(
     () => ({
+      role,
       state,
       loading,
       toasts,
@@ -255,6 +258,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       state,
+      role,
       loading,
       toasts,
       refresh,

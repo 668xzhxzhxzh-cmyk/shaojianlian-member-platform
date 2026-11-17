@@ -6,6 +6,24 @@ import pg from "pg";
 import { createWecomContactService } from "./wecom-contact.mjs";
 import { createWecomCallbackService } from "./wecom-callback.mjs";
 import { createWecomAppService } from "./wecom-app.mjs";
+import { createWecomCustomerService } from "./wecom-kf.mjs";
+import { createHermesCustomerReplyService, createHermesVisionService } from "./hermes-vision.mjs";
+import { createHermesCommandRouter } from "./hermes-command-router.mjs";
+import { createHermesEvolutionService, scheduleHermesEvolution } from "./hermes-evolution.mjs";
+import { createCourseReminderService } from "./course-reminders.mjs";
+import { compactWecomHermesReply, resolveWecomMemberContext } from "./wecom-agent.mjs";
+import { redactConversationText } from "../lib/public-conversation-text.mjs";
+import {
+  createWecomConversationStore,
+  isContextualFollowUp,
+  isCourseReference,
+} from "./wecom-conversation.mjs";
+import {
+  clearSessionCookies,
+  requestedSessionRole,
+  sessionCookie,
+  sessionTokenForRole,
+} from "./session-cookies.mjs";
 
 const { Pool } = pg;
 const port = Number(process.env.API_PORT || 8788);
@@ -76,14 +94,47 @@ const seedState = {
   ],
 };
 
-const hermesPrompt = `你是邵教练专属会员平台唯一的 Hermes 执行型管理智能体。你具备 shao-coach MCP 工具，可查询精确会员档案、列出教练名下 member_id、增改删私教课程、更新训练方案、更新饮食方案、新增身体反馈、更新会员计划并核验变更历史。不要回答“没有这个工具”；应先检查可用 MCP 工具并选择最窄的一个执行。所有查询与修改必须使用精确 member_id，禁止按姓名或昵称猜测。删除课程前必须先查询并向教练确认精确 session_id；新增课程缺少日期、时间或训练重点时应先追问，使用稳定 request_id 避免重试造成重复课程。执行修改后再次查询或读取变更历史，并明确列出真实改变的字段；页面会自动同步，无需提示用户点击同步按钮。管理端的 AI 建议管理只是审核队列，不是你的对话入口。客户消息仍必须先创建草稿并由教练确认；不要声称已经发送或会员已收到。不做医疗诊断；持续疼痛、夜间痛、眩晕或胸闷应建议暂停训练并咨询合格医务人员。`;
+const hermesPrompt = `你是邵教练的 Hermes 会员管理管家，具备 shao-coach MCP 工具。只使用系统已验证的精确 member_id；系统已给出时不得再次索要。参数齐全就调用最窄工具执行，参数不足只追问缺失项。
+
+企业微信回复只写结果或一个必要问题，不寒暄、不解释规则、不列能力，最多 3 个短句、120 个汉字。训练、饮食、身体反馈等修改执行后核验网站状态。删除课程和涉及训练、饮食、伤痛、费用等教练决策的客户消息必须确认；课程提醒、预约确认、打卡、饮水、饮食记录和会员到期等已确定事实提醒可直接调用 create_member_message，不要求聊天内二次审批。企业微信客户联系任务仍需在客户端确认；未取得真实发送状态不得说会员已收到。不要向教练展示 task_id、member_id、session_id、UUID 或其他内部编号。不要声称没有工具，先检查 MCP。不做医疗诊断。`;
 
 await initializeDatabase();
+const wecomConversation = createWecomConversationStore({ pool });
 const wecomContact = createWecomContactService({ pool });
 const wecomApp = createWecomAppService();
+const hermesVision = createHermesVisionService();
+const hermesCustomerReply = createHermesCustomerReplyService();
+const wecomCustomerService = createWecomCustomerService({
+  pool,
+  visionService: hermesVision,
+  replyService: hermesCustomerReply,
+  audit,
+});
+const courseReminders = createCourseReminderService({
+  pool,
+  queueRoutineMessage: (message) => wecomContact.createCustomerMessage(message),
+  notifyCoach: (coachUserId, content) => wecomApp.sendText({ toUserId: coachUserId, content }),
+});
+const hermesEvolution = createHermesEvolutionService({
+  pool,
+  modelReview: requestHermesDailyModelReview,
+  log: (level, message, error) => console[level === "warn" ? "warn" : "log"](JSON.stringify({
+    level,
+    message,
+    detail: error ? String(error?.message || error).slice(0, 240) : undefined,
+  })),
+});
+const hermesCommandRouter = createHermesCommandRouter({ wecomContact });
+const wecomCoachQueues = new Map();
 const wecomCallback = createWecomCallbackService({
   onMessage: async (message) => {
-    await handleWecomCoachMessage(message);
+    await enqueueWecomCoachMessage(message);
+  },
+  onContactEvent: async (message) => {
+    await wecomContact.handleContactEvent(message);
+  },
+  onCustomerServiceEvent: async (message) => {
+    await wecomCustomerService.handleEvent(message);
   },
 });
 
@@ -98,11 +149,13 @@ const server = createServer(async (request, response) => {
       region: "ezhou",
       time: new Date().toISOString(),
       integrations: {
-        deepseek: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
+        ai: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
         hermes: Boolean(process.env.HERMES_API_URL && process.env.HERMES_API_KEY),
         wecomContact: wecomContact.contactConfigured,
         wecomCallback: wecomCallback.callbackConfigured,
         wecomApp: wecomApp.appConfigured,
+        wecomCustomerService: wecomCustomerService.configured && wecomCallback.callbackConfigured,
+        hermesVision: hermesVision.configured,
         hermesMemberTools: wecomContact.toolsConfigured,
       },
     });
@@ -125,7 +178,9 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/auth/login" && request.method === "POST") return login(request, response);
     if (url.pathname === "/api/auth/register" && request.method === "POST") return register(request, response);
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
-      response.setHeader("set-cookie", `shao_session=; Path=/; HttpOnly; ${cookieSecure ? "Secure; " : ""}SameSite=Strict; Max-Age=0`);
+      const role = requestedSessionRole(request);
+      if (!role) return json(response, 400, { error: "退出入口无效" });
+      response.setHeader("set-cookie", clearSessionCookies(role, { secure: cookieSecure }));
       return json(response, 200, { ok: true });
     }
     const session = await readSession(request);
@@ -142,6 +197,12 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/users" && request.method === "GET") return listUsers(response, session);
     if (url.pathname === "/api/users" && request.method === "POST") return createUser(request, response, session);
     if (url.pathname === "/api/users" && request.method === "PATCH") return updateUser(request, response, session);
+    if (url.pathname === "/api/hermes/evolution" && request.method === "GET") {
+      if (!["coach", "admin"].includes(session.role)) return json(response, 403, { error: "无权查看 Hermes 复盘" });
+      return json(response, 200, { review: await hermesEvolution.getLatestReview() });
+    }
+    if (url.pathname === "/api/customer-conversations" && request.method === "GET") return listCustomerConversations(response, session, url);
+    if (url.pathname === "/api/agent/conversations" && request.method === "GET") return listHermesWebConversations(response, session, url);
     if (url.pathname === "/api/actions" && request.method === "POST") return handleAction(request, response, session);
     if (url.pathname === "/api/agent/chat" && request.method === "POST") return handleHermes(request, response, session);
     return json(response, 404, { error: "接口不存在" });
@@ -154,6 +215,45 @@ const server = createServer(async (request, response) => {
 server.listen(port, host, () => {
   console.log(JSON.stringify({ level: "info", message: `API listening on ${host}:${port}` }));
 });
+
+if (port === 8788) {
+  scheduleHermesEvolution(hermesEvolution);
+  let reconcilingWecomTasks = false;
+  const reconcileWecomTasks = async () => {
+    if (reconcilingWecomTasks) return;
+    reconcilingWecomTasks = true;
+    try {
+      const result = await wecomContact.reconcileSendTasks({
+        notifyCoach: (coachUserId, content) => wecomApp.sendText({ toUserId: coachUserId, content }),
+      });
+      if (result.checked || result.retries) {
+        console.log(JSON.stringify({ level: "info", message: "WeCom send tasks reconciled", ...result }));
+      }
+    } catch (error) {
+      console.error(JSON.stringify({ level: "error", message: "WeCom send task reconciliation failed", detail: String(error?.message || error).slice(0, 240) }));
+    } finally {
+      reconcilingWecomTasks = false;
+    }
+  };
+  const initialReconcile = setTimeout(() => void reconcileWecomTasks(), 20_000);
+  const reconcileTimer = setInterval(() => void reconcileWecomTasks(), 120_000);
+  const runCourseReminders = () => courseReminders.run().catch((error) => {
+    console.error(JSON.stringify({ level: "error", message: "Course reminder scan failed", detail: String(error?.message || error).slice(0, 240) }));
+  });
+  const initialCourseReminder = setTimeout(() => void runCourseReminders(), 30_000);
+  const courseReminderTimer = setInterval(() => void runCourseReminders(), 120_000);
+  const retryCustomerMessages = () => wecomCustomerService.retryFailedMessages().catch((error) => {
+    console.error(JSON.stringify({ level: "error", message: "WeCom customer message retry failed", detail: String(error?.message || error).slice(0, 240) }));
+  });
+  const initialCustomerRetry = setTimeout(() => void retryCustomerMessages(), 45_000);
+  const customerRetryTimer = setInterval(() => void retryCustomerMessages(), 120_000);
+  initialReconcile.unref();
+  reconcileTimer.unref();
+  initialCourseReminder.unref();
+  courseReminderTimer.unref();
+  initialCustomerRetry.unref();
+  customerRetryTimer.unref();
+}
 
 async function initializeDatabase() {
   await pool.query(`
@@ -192,9 +292,49 @@ async function initializeDatabase() {
       status TEXT NOT NULL DEFAULT 'draft',
       wecom_msgid TEXT,
       provider_message TEXT,
+      retry_of UUID UNIQUE REFERENCES wecom_send_tasks(id) ON DELETE SET NULL,
+      next_retry_at TIMESTAMPTZ,
+      delivered_at TIMESTAMPTZ,
+      message_kind TEXT NOT NULL DEFAULT 'coach_decision',
+      approval_mode TEXT NOT NULL DEFAULT 'coach_required',
+      source_key TEXT UNIQUE,
+      scheduled_for TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       confirmed_at TIMESTAMPTZ,
       provider_updated_at TIMESTAMPTZ
+    );
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS retry_of UUID REFERENCES wecom_send_tasks(id) ON DELETE SET NULL;
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ;
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS message_kind TEXT NOT NULL DEFAULT 'coach_decision';
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS approval_mode TEXT NOT NULL DEFAULT 'coach_required';
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS source_key TEXT;
+    ALTER TABLE wecom_send_tasks ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMPTZ;
+    CREATE TABLE IF NOT EXISTS wecom_course_reminders (
+      id UUID PRIMARY KEY,
+      member_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      booking_id TEXT NOT NULL,
+      reminder_type TEXT NOT NULL,
+      course_start TIMESTAMPTZ NOT NULL,
+      send_task_id UUID REFERENCES wecom_send_tasks(id) ON DELETE SET NULL,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(member_id,booking_id,reminder_type,course_start)
+    );
+    CREATE TABLE IF NOT EXISTS wecom_binding_links (
+      state_token TEXT PRIMARY KEY,
+      member_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      coach_userid TEXT NOT NULL,
+      config_id TEXT NOT NULL,
+      qr_code TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      external_userid TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ
     );
     CREATE TABLE IF NOT EXISTS wecom_callback_messages (
       dedupe_key TEXT PRIMARY KEY,
@@ -206,11 +346,94 @@ async function initializeDatabase() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS wecom_customer_messages (
+      msg_id TEXT PRIMARY KEY,
+      external_userid TEXT NOT NULL,
+      open_kfid TEXT NOT NULL,
+      msg_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'processing',
+      payload_json JSONB NOT NULL DEFAULT '{}',
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      result TEXT,
+      error_message TEXT,
+      next_retry_at TIMESTAMPTZ,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS wecom_customer_sync_state (
+      open_kfid TEXT PRIMARY KEY,
+      cursor TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS wecom_customer_conversations (
+      external_userid TEXT PRIMARY KEY,
+      member_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      turns_json JSONB NOT NULL DEFAULT '[]',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS wecom_coach_conversations (
+      coach_userid TEXT PRIMARY KEY,
+      member_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      session_id TEXT,
+      pending_json JSONB,
+      turns_json JSONB NOT NULL DEFAULT '[]',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS hermes_web_conversations (
+      id UUID PRIMARY KEY,
+      coach_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      member_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      turns_json JSONB NOT NULL DEFAULT '[]',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS hermes_daily_reviews (
+      review_date DATE PRIMARY KEY,
+      metrics_json JSONB NOT NULL DEFAULT '{}',
+      summary TEXT NOT NULL,
+      learned_rules JSONB NOT NULL DEFAULT '[]',
+      repair_proposals JSONB NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS hermes_runtime_incidents (
+      id UUID PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      category TEXT NOT NULL,
+      evidence JSONB NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'observed',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE wecom_coach_conversations ADD COLUMN IF NOT EXISTS pending_json JSONB;
+    ALTER TABLE wecom_customer_messages ADD COLUMN IF NOT EXISTS payload_json JSONB NOT NULL DEFAULT '{}';
+    ALTER TABLE wecom_customer_messages ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE wecom_customer_messages ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+    ALTER TABLE wecom_customer_messages ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
+    UPDATE wecom_customer_messages
+    SET status='replied',result='replied_before_context_failure',sent_at=COALESCE(sent_at,updated_at),
+        error_message=NULL,next_retry_at=NULL,updated_at=NOW()
+    WHERE status='failed' AND sent_at IS NULL
+      AND error_message ~* '(invalid input syntax.*json|malformed array literal)';
     CREATE INDEX IF NOT EXISTS audit_log_actor_date_idx ON audit_log(actor_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS notifications_status_date_idx ON notifications(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS member_wecom_bindings_coach_idx ON member_wecom_bindings(coach_userid, status);
     CREATE INDEX IF NOT EXISTS wecom_send_tasks_coach_status_idx ON wecom_send_tasks(coach_userid, status, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS wecom_send_tasks_retry_of_unique_idx ON wecom_send_tasks(retry_of) WHERE retry_of IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS wecom_send_tasks_retry_due_idx ON wecom_send_tasks(status, next_retry_at) WHERE next_retry_at IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS wecom_send_tasks_source_key_unique_idx ON wecom_send_tasks(source_key) WHERE source_key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS wecom_course_reminders_status_start_idx ON wecom_course_reminders(status, course_start);
+    CREATE INDEX IF NOT EXISTS wecom_binding_links_member_status_idx ON wecom_binding_links(member_id, coach_userid, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS wecom_callback_messages_coach_date_idx ON wecom_callback_messages(coach_userid, created_at DESC);
+    CREATE INDEX IF NOT EXISTS wecom_customer_messages_external_date_idx ON wecom_customer_messages(external_userid, created_at DESC);
+    CREATE INDEX IF NOT EXISTS wecom_customer_messages_retry_idx ON wecom_customer_messages(status, next_retry_at) WHERE next_retry_at IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS wecom_customer_conversations_member_idx ON wecom_customer_conversations(member_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS wecom_coach_conversations_updated_idx ON wecom_coach_conversations(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS hermes_web_conversations_coach_member_idx ON hermes_web_conversations(coach_id,member_id,updated_at DESC);
+    CREATE INDEX IF NOT EXISTS hermes_runtime_incidents_fingerprint_idx ON hermes_runtime_incidents(fingerprint, updated_at DESC);
   `);
   const accounts = [
     ["member-li", process.env.MEMBER_PHONE || "13800005206", "李明", "member", process.env.MEMBER_PASSWORD || "Member@2026"],
@@ -220,11 +443,36 @@ async function initializeDatabase() {
   for (const [id, phone, name, role, password] of accounts) {
     const hash = await bcrypt.hash(password, 12);
     await pool.query(
-      "INSERT INTO users (id, phone, name, role, password_hash) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET phone=EXCLUDED.phone,name=EXCLUDED.name,role=EXCLUDED.role,password_hash=EXCLUDED.password_hash",
+      `INSERT INTO users (id, phone, name, role, password_hash)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (id) DO UPDATE
+       SET phone=EXCLUDED.phone,
+           name=CASE WHEN EXCLUDED.role='member' THEN users.name ELSE EXCLUDED.name END,
+           role=EXCLUDED.role,
+           password_hash=EXCLUDED.password_hash`,
       [id, phone, name, role, hash],
     );
   }
+  const defaultCoachUserId = soleAllowedCoachUserId();
+  if (defaultCoachUserId) {
+    await pool.query(
+      `INSERT INTO member_wecom_bindings (member_id,external_userid,coach_userid,status,updated_at)
+       SELECT id,NULL,$1,'active',NOW()
+       FROM users
+       WHERE role='member'
+       ON CONFLICT (member_id) DO NOTHING`,
+      [defaultCoachUserId],
+    );
+  }
   await pool.query("INSERT INTO portal_state (user_id, state_json) VALUES ('member-li',$1) ON CONFLICT (user_id) DO NOTHING", [seedState]);
+}
+
+function soleAllowedCoachUserId() {
+  const coachUserIds = String(process.env.WECOM_ALLOWED_COACH_USERIDS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return coachUserIds.length === 1 ? coachUserIds[0] : "";
 }
 
 async function login(request, response) {
@@ -278,6 +526,15 @@ async function register(request, response) {
       [id, phone, name, passwordHash],
     );
     await client.query("INSERT INTO portal_state (user_id,state_json) VALUES ($1,$2)", [id, memberState]);
+    const defaultCoachUserId = soleAllowedCoachUserId();
+    if (defaultCoachUserId) {
+      await client.query(
+        `INSERT INTO member_wecom_bindings
+           (member_id,external_userid,coach_userid,status,updated_at)
+         VALUES ($1,NULL,$2,'active',NOW())`,
+        [id, defaultCoachUserId],
+      );
+    }
     await client.query(
       "INSERT INTO audit_log (id,actor_id,action,detail) VALUES ($1,$2,'self_register',$3)",
       [randomUUID(), id, { channel: "website", role: "member" }],
@@ -329,16 +586,18 @@ function createMemberState({ id, name, phone }) {
 async function issueSession(response, user, status = 200) {
   const token = await new SignJWT({ role: user.role, name: user.name })
     .setProtectedHeader({ alg: "HS256" }).setSubject(user.id).setIssuedAt().setExpirationTime("12h").sign(sessionSecret);
-  response.setHeader("set-cookie", `shao_session=${token}; Path=/; HttpOnly; ${cookieSecure ? "Secure; " : ""}SameSite=Strict; Max-Age=43200`);
+  response.setHeader("set-cookie", sessionCookie(user.role, token, { secure: cookieSecure }));
   return json(response, status, { user: { id: user.id, name: user.name, role: user.role } });
 }
 
 async function readSession(request) {
-  const cookies = Object.fromEntries(String(request.headers.cookie || "").split(";").map((part) => part.trim().split(/=(.*)/s).slice(0, 2)));
-  const token = cookies.shao_session;
+  const requestedRole = requestedSessionRole(request);
+  if (!requestedRole) return null;
+  const token = sessionTokenForRole(request.headers.cookie, requestedRole);
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, sessionSecret, { algorithms: ["HS256"] });
+    if (payload.role !== requestedRole) return null;
     return { id: payload.sub, role: payload.role, name: payload.name };
   } catch {
     return null;
@@ -391,6 +650,15 @@ async function createUser(request, response, session) {
     if (role === "member") {
       const memberState = createMemberState({ id, name, phone });
       await pool.query("INSERT INTO portal_state (user_id,state_json) VALUES ($1,$2)", [id, memberState]);
+      const defaultCoachUserId = soleAllowedCoachUserId();
+      if (defaultCoachUserId) {
+        await pool.query(
+          `INSERT INTO member_wecom_bindings
+             (member_id,external_userid,coach_userid,status,updated_at)
+           VALUES ($1,NULL,$2,'active',NOW())`,
+          [id, defaultCoachUserId],
+        );
+      }
     }
     await audit(session.id, "user_create", { id, role });
     return json(response, 201, { user: { id, name, role }, temporaryPassword });
@@ -473,6 +741,60 @@ async function handleAction(request, response, session) {
   return json(response, 200, { ok: true, state });
 }
 
+async function listCustomerConversations(response, session, url) {
+  if (session.role !== "coach") return json(response, 403, { error: "仅教练可查看会员客服记录" });
+  const coachUserId = soleAllowedCoachUserId();
+  if (!coachUserId) return json(response, 503, { error: "教练企业微信账号尚未完成唯一配置" });
+  const memberId = String(url.searchParams.get("member_id") || "").trim();
+  const params = [coachUserId];
+  const memberFilter = memberId ? "AND c.member_id=$2" : "";
+  if (memberId) params.push(memberId);
+  const result = await pool.query(
+    `SELECT c.member_id,u.name,c.turns_json,c.updated_at
+     FROM wecom_customer_conversations c
+     JOIN users u ON u.id=c.member_id AND u.role='member'
+     JOIN member_wecom_bindings b ON b.member_id=c.member_id
+       AND b.external_userid=c.external_userid AND b.status='active'
+     WHERE b.coach_userid=$1 ${memberFilter}
+     ORDER BY c.updated_at DESC LIMIT 50`,
+    params,
+  );
+  return json(response, 200, {
+    conversations: result.rows.map((row) => ({
+      memberId: row.member_id,
+      memberName: row.name,
+      updatedAt: row.updated_at,
+      turns: sanitizeConversationTurns(row.turns_json, row.member_id),
+    })),
+  });
+}
+
+async function listHermesWebConversations(response, session, url) {
+  if (session.role !== "coach") return json(response, 403, { error: "仅教练可查看 Hermes 历史" });
+  const memberId = String(url.searchParams.get("member_id") || "").trim();
+  const params = [session.id];
+  const memberFilter = memberId ? "AND h.member_id=$2" : "";
+  if (memberId) params.push(memberId);
+  const result = await pool.query(
+    `SELECT h.id,h.member_id,u.name AS member_name,h.title,h.turns_json,h.updated_at
+     FROM hermes_web_conversations h
+     JOIN users u ON u.id=h.member_id AND u.role='member' AND u.status='active'
+     WHERE h.coach_id=$1 ${memberFilter}
+     ORDER BY h.updated_at DESC LIMIT 20`,
+    params,
+  );
+  return json(response, 200, {
+    conversations: result.rows.map((row) => ({
+      id: row.id,
+      memberId: row.member_id,
+      memberName: row.member_name,
+      title: row.title,
+      updatedAt: row.updated_at,
+      turns: sanitizeConversationTurns(row.turns_json, row.member_id),
+    })),
+  });
+}
+
 async function handleHermes(request, response, session) {
   if (session.role !== "coach") {
     await audit(session.id, "hermes_chat_denied", { role: session.role });
@@ -483,7 +805,7 @@ async function handleHermes(request, response, session) {
   if (!memberId) return json(response, 400, { error: "必须提供 member_id，禁止根据昵称猜测会员" });
   const memberState = await readPortalState(session, memberId);
   if (!memberState) return json(response, 404, { error: "找不到该 member_id 对应的会员" });
-  const messages = Array.isArray(body.messages) ? body.messages.slice(-20).filter((item) => ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.length <= 4000) : [];
+  const messages = Array.isArray(body.messages) ? body.messages.slice(-10).filter((item) => ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.length <= 1600) : [];
   if (!messages.length) return json(response, 400, { error: "请输入问题" });
   if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) return json(response, 503, { error: "AI 服务尚未配置" });
 
@@ -497,18 +819,33 @@ async function handleHermes(request, response, session) {
   if (!["http:", "https:"].includes(hermesApi.protocol) || !allowedHosts.has(hermesApi.hostname)) {
     return json(response, 500, { error: "AI 服务必须使用服务器私有回环地址" });
   }
+  const evolutionContext = await hermesEvolution.promptContext();
+  const requestedConversationId = String(body.conversation_id || "").trim();
+  let conversationId = requestedConversationId;
+  if (conversationId) {
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(conversationId)) return json(response, 400, { error: "对话标识无效" });
+    const owned = await pool.query(
+      "SELECT id FROM hermes_web_conversations WHERE id=$1 AND coach_id=$2 AND member_id=$3",
+      [conversationId, session.id, memberId],
+    );
+    if (!owned.rows[0]) return json(response, 404, { error: "找不到该历史对话" });
+  } else {
+    conversationId = randomUUID();
+  }
+  const currentQuestion = [...messages].reverse().find((item) => item.role === "user")?.content || "";
+  const relevantState = selectCoachHermesState(memberState, currentQuestion);
 
   const upstream = await fetch(new URL("/v1/chat/completions", hermesApi), {
     method: "POST",
     headers: {
       authorization: `Bearer ${process.env.HERMES_API_KEY}`,
       "content-type": "application/json",
-      "x-hermes-session-key": `shao-platform:${session.id}`,
+      "x-hermes-session-key": `shao-platform:${session.id}:${conversationId}`,
     },
     body: JSON.stringify({
       model: "hermes-agent",
       stream: true,
-      messages: [{ role: "system", content: hermesPrompt }, { role: "system", content: `当前操作对象是精确 member_id=${memberId}。以下是网站最新会员数据；如教练要求修改，必须调用对应 MCP 网站管理工具，工具执行后网站会自动同步：${JSON.stringify({ member: memberState.profile, bodyMetrics: memberState.bodyMetrics, meals: memberState.meals, bookings: memberState.bookings, trainingPlan: memberState.trainingPlan, nutritionPlan: memberState.nutritionPlan, bodyFeedbacks: memberState.bodyFeedbacks }).slice(0, 18000)}` }, ...messages],
+      messages: [{ role: "system", content: `${hermesPrompt}${evolutionContext}` }, { role: "system", content: `当前操作对象是精确 member_id=${memberId}。以下只提供与当前问题相关的网站最新数据；需要其他数据时调用 MCP 查询，修改后核验网站：${JSON.stringify(relevantState).slice(0, 8000)}` }, ...messages],
     }),
     signal: AbortSignal.timeout(120000),
   });
@@ -516,10 +853,11 @@ async function handleHermes(request, response, session) {
     console.error(JSON.stringify({ level: "error", integration: "hermes", status: upstream.status }));
     return json(response, 502, { error: "AI 智能体暂时不可用" });
   }
-  response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store, no-transform", "x-accel-buffering": "no" });
+  response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store, no-transform", "x-accel-buffering": "no", "x-conversation-id": conversationId });
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let assistantReply = "";
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -532,15 +870,61 @@ async function handleHermes(request, response, session) {
       if (!data || data === "[DONE]") continue;
       try {
         const content = JSON.parse(data).choices?.[0]?.delta?.content;
-        if (content) response.write(content);
+        if (content) {
+          assistantReply += content;
+          response.write(content);
+        }
       } catch {}
     }
   }
+  const storedTurns = [...messages, { role: "assistant", content: assistantReply }]
+    .slice(-12)
+    .map((turn) => ({ role: turn.role, content: String(turn.content || "").slice(0, 1600) }));
+  const firstQuestion = storedTurns.find((turn) => turn.role === "user")?.content || "Hermes 对话";
+  await pool.query(
+    `INSERT INTO hermes_web_conversations (id,coach_id,member_id,title,turns_json,updated_at)
+     VALUES ($1,$2,$3,$4,$5,NOW())
+     ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title,turns_json=EXCLUDED.turns_json,updated_at=NOW()`,
+    [conversationId, session.id, memberId, Array.from(firstQuestion).slice(0, 32).join(""), JSON.stringify(storedTurns)],
+  ).catch((error) => console.error(JSON.stringify({ level: "error", integration: "hermes-history", message: String(error?.message || error).slice(0, 160) })));
   response.end();
   await audit(session.id, "hermes_chat", { memberId, messageCount: messages.length });
 }
 
+function sanitizeConversationTurns(value, memberId) {
+  return (Array.isArray(value) ? value : []).slice(-12).flatMap((turn) => {
+    const role = turn?.role === "assistant" ? "assistant" : turn?.role === "user" ? "user" : "";
+    const content = redactConversationText(String(turn?.content || "").slice(0, 1800), { memberIds: [memberId] });
+    return role && content ? [{ role, content }] : [];
+  });
+}
+
+function selectCoachHermesState(state, question) {
+  const text = String(question || "");
+  const result = { member: state.profile };
+  if (/课|排期|预约|删除|时间/.test(text)) result.bookings = state.bookings?.slice(-10) || [];
+  if (/训练|动作|方案|恢复|疼|痛/.test(text)) {
+    result.trainingPlan = state.trainingPlan;
+    result.bodyMetrics = state.bodyMetrics?.slice(-4) || [];
+    result.bodyFeedbacks = state.bodyFeedbacks?.slice(-3) || [];
+  }
+  if (/饮食|餐|热量|蛋白|碳水/.test(text)) {
+    result.nutritionPlan = state.nutritionPlan;
+    result.meals = state.meals?.slice(-4) || [];
+    result.bodyMetrics = state.bodyMetrics?.slice(-3) || [];
+  }
+  if (/完整|档案|全部/.test(text)) {
+    result.bookings = state.bookings?.slice(-8) || [];
+    result.trainingPlan = state.trainingPlan;
+    result.nutritionPlan = state.nutritionPlan;
+    result.bodyMetrics = state.bodyMetrics?.slice(-4) || [];
+    result.bodyFeedbacks = state.bodyFeedbacks?.slice(-3) || [];
+  }
+  return result;
+}
+
 async function handleWecomCoachMessage(message) {
+  const startedAt = Date.now();
   const coachUserId = String(message.fromUserName || "").trim();
   const dedupeKey = String(message.msgId || "").trim() || createHash("sha256")
     .update([coachUserId, message.createTime, message.msgType, message.event, message.content].join("\u0000"), "utf8")
@@ -564,17 +948,40 @@ async function handleWecomCoachMessage(message) {
   });
 
   try {
-    const reply = message.msgType === "text" && message.content
+    const result = message.msgType === "text" && message.content
       ? await requestHermesWecomReply(message)
-      : "目前仅支持文字指令。请发送包含精确 member_id 的文字任务。";
-    await wecomApp.sendText({ toUserId: coachUserId, content: reply });
+      : { reply: "目前仅支持文字指令。请发送文字任务。" };
+    const compactReply = compactWecomHermesReply(result.reply, undefined, {
+      memberIds: result.memberId ? [result.memberId] : [],
+    });
+    await wecomApp.sendText({ toUserId: coachUserId, content: compactReply });
+    if (result.content) {
+      const sessionId = await resolveConversationSessionId({
+        memberId: result.memberId,
+        previousSessionId: result.sessionId || result.previousSessionId,
+        content: result.content,
+        reply: compactReply,
+      });
+      await wecomConversation.saveTurn({
+        coachUserId,
+        memberId: result.memberId,
+        sessionId,
+        pendingAction: result.pendingAction,
+        clearPending: result.clearPending,
+        clearSession: result.clearSession,
+        userContent: result.content,
+        assistantContent: compactReply,
+      });
+    }
     await pool.query(
       "UPDATE wecom_callback_messages SET status='replied',updated_at=NOW() WHERE dedupe_key=$1",
       [dedupeKey],
     );
     await audit(coachUserId, "wecom_callback_replied", {
       msgId: message.msgId,
-      replyLength: reply.length,
+      replyLength: compactReply.length,
+      route: result.fastPath || "hermes_model",
+      durationMs: Date.now() - startedAt,
     });
   } catch (error) {
     const safeMessage = error instanceof Error ? error.message.slice(0, 400) : "企业微信消息处理失败";
@@ -583,11 +990,52 @@ async function handleWecomCoachMessage(message) {
       [dedupeKey, safeMessage],
     );
     await audit(coachUserId, "wecom_callback_failed", { msgId: message.msgId, error: safeMessage });
+    await wecomApp.sendText({
+      toUserId: coachUserId,
+      content: "这条指令处理失败了，请稍后重试；系统没有把失败操作当作已完成。",
+    }).catch(() => {});
     throw error;
   }
 }
 
+function enqueueWecomCoachMessage(message) {
+  const coachUserId = String(message.fromUserName || "").trim();
+  const previous = wecomCoachQueues.get(coachUserId) || Promise.resolve();
+  const current = previous.catch(() => {}).then(() => handleWecomCoachMessage(message));
+  wecomCoachQueues.set(coachUserId, current);
+  return current.finally(() => {
+    if (wecomCoachQueues.get(coachUserId) === current) wecomCoachQueues.delete(coachUserId);
+  });
+}
+
 async function requestHermesWecomReply(message) {
+  const content = String(message.content || "").trim().slice(0, 4000);
+  const conversation = await wecomConversation.load(message.fromUserName);
+  const useConversationMember = isContextualFollowUp(content);
+  const resolvedMember = await resolveWecomMemberContext({
+    pool,
+    coachUserId: message.fromUserName,
+    content,
+    trustedMemberId: useConversationMember ? conversation.memberId : "",
+    allowSoleBoundMember: useConversationMember,
+  });
+  if (resolvedMember.error) return {
+    reply: resolvedMember.error,
+    content,
+    previousSessionId: conversation.sessionId,
+  };
+  const fastPath = await hermesCommandRouter.route({
+    content,
+    coachUserId: message.fromUserName,
+    resolvedMember,
+    conversation,
+  });
+  if (fastPath) return {
+    ...fastPath,
+    content,
+    previousSessionId: conversation.sessionId,
+  };
+
   if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) {
     throw new Error("Hermes API 尚未配置");
   }
@@ -596,24 +1044,12 @@ async function requestHermesWecomReply(message) {
   if (!["http:", "https:"].includes(hermesApi.protocol) || !allowedHosts.has(hermesApi.hostname)) {
     throw new Error("Hermes API 必须使用服务器私有回环地址");
   }
-
-  const content = String(message.content || "").trim().slice(0, 4000);
-  const memberMatch = content.match(/\bmember_id\s*[=:：]\s*([A-Za-z0-9][A-Za-z0-9_-]{0,127})/i);
-  let memberContext = "本条指令未提供 member_id；只有列出当前教练会员等无需指定会员的操作可以继续，其他操作必须先要求教练提供精确 member_id，禁止按姓名或昵称猜测。";
-  if (memberMatch) {
-    const memberId = memberMatch[1];
-    const result = await pool.query(
-      `SELECT u.id,u.name,u.status,p.state_json
-       FROM users u
-       JOIN member_wecom_bindings b ON b.member_id=u.id AND b.status='active'
-       LEFT JOIN portal_state p ON p.user_id=u.id
-       WHERE u.id=$1 AND u.role='member' AND u.status='active' AND b.coach_userid=$2
-       LIMIT 1`,
-      [memberId, message.fromUserName],
-    );
-    if (!result.rows[0]) return `找不到 member_id=${memberId}，或该会员未绑定给当前教练。请核对精确 member_id。`;
-    memberContext = `当前操作对象是精确 member_id=${memberId}，且已验证绑定给当前教练。网站最新会员数据：${JSON.stringify(result.rows[0].state_json || {}).slice(0, 18000)}`;
-  }
+  const memberContext = resolvedMember.context;
+  const recentSessionId = conversation.sessionId;
+  const recentCourseContext = (isCourseReference(content) || /^确认删除/.test(content)) && recentSessionId
+    ? `最近对话或当前唯一有效绑定中已验证的课程 session_id=${recentSessionId}。遇到“这节课/确认删除”等指代时先用 get_member_by_id 核验该课程；存在时直接使用，不要再次索要 member_id 或 session_id。`
+    : "本条没有可引用的最近课程 session_id。";
+  const evolutionContext = await hermesEvolution.promptContext();
 
   const upstream = await fetch(new URL("/v1/chat/completions", hermesApi), {
     method: "POST",
@@ -625,19 +1061,36 @@ async function requestHermesWecomReply(message) {
     body: JSON.stringify({
       model: "hermes-agent",
       stream: true,
+      temperature: 0.1,
+      max_tokens: 480,
       messages: [
-        { role: "system", content: hermesPrompt },
-        { role: "system", content: `当前请求来自已通过企业微信签名、AES 解密和 userid 白名单验证的自建应用教练 userid=${message.fromUserName}。${memberContext}` },
+        { role: "system", content: `${hermesPrompt}${evolutionContext}` },
+        { role: "system", content: `当前请求来自已通过企业微信签名、AES 解密和 userid 白名单验证的自建应用教练 userid=${message.fromUserName}。${memberContext}${recentCourseContext}` },
+        ...conversation.turns,
         { role: "user", content },
       ],
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(60000),
   });
   if (!upstream.ok || !upstream.body) throw new Error(`Hermes API 暂时不可用（status=${upstream.status}）`);
 
   const reply = await collectHermesReply(upstream.body);
   if (!reply.trim()) throw new Error("Hermes 未返回文字结果");
-  return reply.trim();
+  return {
+    reply: reply.trim(),
+    content,
+    memberId: resolvedMember.memberId,
+    previousSessionId: recentSessionId,
+  };
+}
+
+async function resolveConversationSessionId({ memberId, previousSessionId, content, reply }) {
+  if (!memberId || (!isCourseReference(content) && !isCourseReference(reply))) {
+    return previousSessionId || "";
+  }
+  const explicitSessionId = `${content}\n${reply}`.match(/\bsession_id\s*[=:：]\s*([A-Za-z0-9][A-Za-z0-9_-]{0,127})/i)?.[1];
+  if (explicitSessionId) return explicitSessionId;
+  return previousSessionId || "";
 }
 
 async function collectHermesReply(body) {
@@ -662,6 +1115,34 @@ async function collectHermesReply(body) {
     }
   }
   return reply;
+}
+
+async function requestHermesDailyModelReview({ reviewDate, metrics, learnedRules, repairProposals }) {
+  if (!process.env.HERMES_API_URL || !process.env.HERMES_API_KEY) return "";
+  const hermesApi = new URL(process.env.HERMES_API_URL);
+  if (!["127.0.0.1", "localhost", "host.docker.internal"].includes(hermesApi.hostname)) return "";
+  const upstream = await fetch(new URL("/v1/chat/completions", hermesApi), {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${process.env.HERMES_API_KEY}`,
+      "content-type": "application/json",
+      "x-hermes-session-key": `shao-daily-review:${reviewDate}`,
+    },
+    body: JSON.stringify({
+      model: "hermes-agent",
+      stream: false,
+      temperature: 0.1,
+      max_tokens: 600,
+      messages: [
+        { role: "system", content: "你是只读的 Hermes 每日复盘器。根据结构化运行指标总结问题、已学习规则和受控修复建议。禁止调用工具、禁止修改数据库或代码、禁止编造发送成功；只输出 220 字以内中文摘要。" },
+        { role: "user", content: JSON.stringify({ reviewDate, metrics, learnedRules, repairProposals }).slice(0, 12000) },
+      ],
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  if (!upstream.ok) throw new Error(`Hermes daily review failed (status=${upstream.status})`);
+  const payload = await upstream.json();
+  return String(payload?.choices?.[0]?.message?.content || "").trim();
 }
 
 async function updateUser(request, response, session) {
