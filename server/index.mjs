@@ -52,7 +52,16 @@ for (const [key, fallback] of [
   ["COACH_PHONE", "13800006608"],
   ["ADMIN_PHONE", "13800008808"],
 ]) {
-  requireSecret(key, { minLength: 11, forbidden: [fallback] });
+  // 手机号是登录账号名而不是秘密：现有生产账号历史性地使用占位号码登录，
+  // 因此只做醒目告警，不拒绝启动；账号密码轮换在受控流程中另行处理。
+  const value = String(process.env[key] || "");
+  if (!value || value.length < 11) {
+    console.error(`[fail-fast] 环境变量 ${key} 缺失或过短，服务拒绝启动。`);
+    process.exit(1);
+  }
+  if (value === fallback) {
+    console.warn(`[warn] ${key} 仍是示例占位号码 ${fallback}：该号码只用作登录账号名，真正的安全边界是密码与 SESSION_SECRET（已强校验）。建议后续在受控流程中更换为真实号码。`);
+  }
 }
 for (const [key, fallback] of [
   ["MEMBER_PASSWORD", "Member@2026"],
