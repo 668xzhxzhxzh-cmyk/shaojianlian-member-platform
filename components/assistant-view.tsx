@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowUp,
@@ -21,10 +21,23 @@ import {
   X,
 } from "lucide-react";
 import { memberRows } from "@/lib/portal-data";
+import { portalFetch } from "@/lib/portal-auth";
+import { redactConversationText } from "@/lib/public-conversation-text.mjs";
 import { usePortal } from "./portal-context";
 import { Avatar, Card, SectionTitle, TrendChart } from "./ui";
 
 type ChatMessage = { role: "coach" | "assistant"; content: string; time: string };
+type EvolutionReview = { review_date?: string; summary?: string; learned_rules?: string[] };
+type HermesConversation = {
+  id: string;
+  memberId: string;
+  memberName: string;
+  title: string;
+  updatedAt: string;
+  turns: Array<{ role: "user" | "assistant"; content: string }>;
+};
+
+const introMessage: ChatMessage = { role: "assistant", content: "你好，邵教练。我是 Hermes 执行型 AI 助理。请先选择会员，再直接交代查询或管理任务。", time: now() };
 
 const quickPrompts = [
   "查看当前会员完整档案",
@@ -42,7 +55,7 @@ export function AssistantView({
   selectedMemberId?: string;
   onSelectMember?: (memberId: string) => void;
 }) {
-  const { state, notify, updateSuggestion, refresh } = usePortal();
+  const { state, role, notify, updateSuggestion, refresh } = usePortal();
   const [localMemberId, setLocalMemberId] = useState(selectedMemberId ?? state.profile.id);
   const [memberOptions, setMemberOptions] = useState(memberRows);
   const activeMemberId = selectedMemberId ?? localMemberId;
@@ -51,22 +64,36 @@ export function AssistantView({
     id: state.profile.id,
     name: state.profile.name,
   };
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "你好，邵教练。我是 Hermes 执行型 AI 助理。请先从右侧选择会员，系统会固定唯一 member_id。你可以直接让我增删或调整私教课程、更新会员档案、训练方案、饮食方案和身体反馈，执行结果会自动同步网站。", time: now() },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([introMessage]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<HermesConversation[]>([]);
+  const [conversationId, setConversationId] = useState("");
   const [memberOpen, setMemberOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [evidenceTab, setEvidenceTab] = useState<"全部" | "训练" | "身体" | "打卡" | "沟通">("全部");
   const [saveState, setSaveState] = useState("");
+  const [evolutionReview, setEvolutionReview] = useState<EvolutionReview | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const chatMessagesRef = useRef<HTMLDivElement | null>(null);
+  const followLatestRef = useRef(true);
+  const scrollFrameRef = useRef<number | null>(null);
   const suggestion = state.suggestions[0];
 
+  const scrollChatToLatest = useCallback((behavior: ScrollBehavior = "auto") => {
+    const element = chatMessagesRef.current;
+    if (!element) return;
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      element.scrollTo({ top: element.scrollHeight, behavior });
+      scrollFrameRef.current = null;
+    });
+  }, []);
+
   useEffect(() => {
-    fetch("/api/users", { credentials: "include" })
+    portalFetch("/api/users", role)
       .then(async (response) => {
         if (!response.ok) return;
         const result = await response.json() as { users?: Array<{ id: string; name: string; phone: string; role: string; status: string }> };
@@ -80,6 +107,38 @@ export function AssistantView({
         })));
       })
       .catch(() => undefined);
+  }, [role]);
+
+  const loadHistory = useCallback(() => {
+    portalFetch(`/api/agent/conversations?member_id=${encodeURIComponent(activeMemberId)}`, role)
+      .then(async (response) => {
+        if (!response.ok) return;
+        const result = await response.json() as { conversations?: HermesConversation[] };
+        setHistoryItems(result.conversations ?? []);
+      })
+      .catch(() => undefined);
+  }, [activeMemberId, role]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [activeMemberId, loadHistory]);
+
+  useEffect(() => {
+    portalFetch("/api/hermes/evolution", role)
+      .then(async (response) => {
+        if (!response.ok) return;
+        const result = await response.json() as { review?: EvolutionReview | null };
+        if (result.review) setEvolutionReview(result.review);
+      })
+      .catch(() => undefined);
+  }, [role]);
+
+  useEffect(() => {
+    if (followLatestRef.current) scrollChatToLatest(busy ? "auto" : "smooth");
+  }, [busy, messages, scrollChatToLatest]);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
   }, []);
 
   const chartData = useMemo(
@@ -91,20 +150,23 @@ export function AssistantView({
     event?.preventDefault();
     const message = input.trim();
     if (!message || busy) return;
+    followLatestRef.current = true;
     const nextMessages = [...messages, { role: "coach" as const, content: message, time: now() }];
     setMessages(nextMessages);
     setInput("");
     setBusy(true);
     const controller = new AbortController();
     abortRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 125_000);
     setMessages((items) => [...items, { role: "assistant", content: "", time: now() }]);
     try {
-      const response = await fetch("/api/agent/chat", {
+      const response = await portalFetch("/api/agent/chat", role, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           member_id: selectedProfile.id,
-          messages: nextMessages.map((item) => ({
+          conversation_id: conversationId || undefined,
+          messages: nextMessages.filter((item, index) => !(index === 0 && item === introMessage)).map((item) => ({
             role: item.role === "coach" ? "user" : "assistant",
             content: item.content,
           })),
@@ -113,23 +175,25 @@ export function AssistantView({
       });
       if (!response.ok) throw new Error(await response.text());
       if (!response.body) throw new Error("AI 暂时没有返回内容");
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let text = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        text += decoder.decode(value, { stream: true });
+      const nextConversationId = response.headers.get("x-conversation-id") || conversationId;
+      if (nextConversationId) setConversationId(nextConversationId);
+      for await (const text of cumulativeText(response.body)) {
         setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: text } : item));
       }
       await refresh(selectedProfile.id);
+      loadHistory();
       notify("AI 操作已完成，会员页面已自动同步");
     } catch (error) {
-      if ((error as Error).name !== "AbortError") {
-        setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, content: "AI 当前处于演示模式。连接生产环境后即可获得实时个性化回答；其他业务功能不受影响。" } : item));
-        notify("AI 服务暂未连接，已切换演示回复", "warning");
-      }
+      const timedOut = (error as Error).name === "AbortError";
+      setMessages((items) => items.map((item, index) => index === items.length - 1 ? {
+        ...item,
+        content: timedOut
+          ? "Hermes 本次处理超时，任务未确认完成。请检查指令信息是否完整后重试。"
+          : "Hermes 暂时未能完成本次任务，请稍后重试；其他业务功能不受影响。",
+      } : item));
+      notify(timedOut ? "Hermes 处理超时，未确认任务完成" : "Hermes 服务暂时不可用", "warning");
     } finally {
+      window.clearTimeout(timeout);
       setBusy(false);
       abortRef.current = null;
     }
@@ -153,29 +217,57 @@ export function AssistantView({
   function chooseMember(memberId: string) {
     setLocalMemberId(memberId);
     onSelectMember?.(memberId);
+    setConversationId("");
+    setMessages([introMessage]);
     setMemberOpen(false);
     const member = memberOptions.find((item) => item.id === memberId);
     setSaveState(`当前会员已切换为 ${member?.name ?? "所选会员"}`);
   }
 
+  function openHistoryItem(item: HermesConversation) {
+    setConversationId(item.id);
+    setMessages(item.turns.map((turn) => ({
+      role: turn.role === "user" ? "coach" : "assistant",
+      content: turn.content,
+      time: formatConversationTime(item.updatedAt),
+    })));
+    setHistoryOpen(false);
+    followLatestRef.current = true;
+    window.setTimeout(() => scrollChatToLatest("auto"), 20);
+  }
+
+  function startNewConversation() {
+    setConversationId("");
+    setMessages([introMessage]);
+    setHistoryOpen(false);
+  }
+
   return (
     <div className="assistant-page">
       <section className="page-intro assistant-intro">
-        <span className="eyebrow">Hermes Agent · DeepSeek V4 Flash</span>
+        <span className="eyebrow">Hermes Agent · AI</span>
         <h1>Hermes 教练执行工作台</h1>
-        <p>这里是教练专用的对话与执行入口。先选择网站会员锁定唯一 member_id，再让 Hermes 实际增删课程、调整训练与饮食方案；管理端的“AI 建议管理”只负责审核，不是同一个页面。</p>
+        <p>这里是教练专用的对话与执行入口。选择会员后系统会安全锁定唯一档案，再让 Hermes 实际增删课程、调整训练与饮食方案；管理端的“AI 建议管理”只负责审核，不是同一个页面。</p>
         <div className="assistant-scope-note"><Bot size={20} /><span><b>教练端：对话并执行会员任务</b><small>管理端：审核建议、权限与发送合规</small></span></div>
       </section>
 
       <div className="assistant-grid">
         <Card className="chat-panel">
           <div className="chat-heading"><div><MessageCircleMore size={20} /><b>与 Hermes 对话</b></div><button className={`icon-button ${historyOpen ? "active" : ""}`} onClick={() => setHistoryOpen((open) => !open)} aria-label="历史记录"><History size={18} /></button></div>
-          {historyOpen ? <div className="chat-history"><b>最近对话</b><button onClick={() => { setHistoryOpen(false); notify("已打开今天 10:32 的恢复分析"); }}>今天 10:32 · 李明恢复分析</button><button onClick={() => { setHistoryOpen(false); notify("已打开 7 月 27 日的饮食复盘"); }}>7 月 27 日 · 饮食执行复盘</button></div> : null}
-          <div className="chat-messages">
+          {historyOpen ? <div className="chat-history"><div><b>最近对话</b><button onClick={startNewConversation}>新对话</button></div>{historyItems.length ? historyItems.map((item) => <button key={item.id} onClick={() => openHistoryItem(item)}><b>{item.title}</b><small>{item.memberName} · {formatConversationTime(item.updatedAt)}</small></button>) : <p>当前会员还没有历史对话</p>}</div> : null}
+          <div
+            className="chat-messages"
+            ref={chatMessagesRef}
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              followLatestRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= 64;
+            }}
+            aria-live="polite"
+          >
             {messages.map((message, index) => (
               <div className={`chat-message ${message.role}`} key={`${message.time}-${index}`}>
                 <Avatar name={message.role === "coach" ? "邵教练" : "H"} size="sm" />
-                <div><span>{message.role === "coach" ? "邵教练" : "AI 助理"} <time>{message.time}</time></span><p>{message.content || <i className="typing">正在分析会员数据</i>}</p></div>
+                <div><span>{message.role === "coach" ? "邵教练" : "AI 助理"} <time>{message.time}</time></span><p>{message.content ? redactConversationText(message.content, { memberIds: [selectedProfile.id] }) : <i className="typing">正在分析会员数据</i>}</p></div>
               </div>
             ))}
           </div>
@@ -184,7 +276,17 @@ export function AssistantView({
             <div>{quickPrompts.map((prompt) => <button key={prompt} onClick={() => choosePrompt(prompt)}>{prompt}</button>)}</div>
           </div>
           <form className="chat-input" onSubmit={askHermes}>
-            <textarea id="hermes-input" value={input} onChange={(event) => setInput(event.target.value)} placeholder="输入你希望 AI 分析的问题或任务…" rows={3} />
+            <textarea
+              id="hermes-input"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onFocus={() => {
+                followLatestRef.current = true;
+                scrollChatToLatest("auto");
+              }}
+              placeholder="输入你希望 AI 分析的问题或任务…"
+              rows={3}
+            />
             <button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="发送给 AI">{busy ? <RefreshCcw className="spin" size={18} /> : <ArrowUp size={18} />}</button>
           </form>
           <small className="ai-disclaimer">AI 建议仅供教练决策参考，不能替代医疗诊断。</small>
@@ -226,7 +328,7 @@ export function AssistantView({
             <MiniTrend title="体脂率（%）" data={chartData} dataKey="bodyFat" />
           </Card>
           <Card className="agent-status">
-            <Bot size={24} /><div><b>AI 服务正常</b><span>DeepSeek 模型 · 鄂州服务区</span></div><i />
+            <Bot size={24} /><div><b>AI 服务正常</b><span>智能分析 · 鄂州服务区</span>{evolutionReview ? <small title={evolutionReview.summary}>每日复盘已开启 · {String(evolutionReview.review_date || "今日").slice(0, 10)} · {evolutionReview.learned_rules?.length ?? 0} 条规则</small> : <small>每日复盘已开启 · 等待首次运行</small>}</div><i />
           </Card>
         </div>
       </div>
@@ -250,6 +352,24 @@ export function AssistantView({
       ) : null}
     </div>
   );
+}
+
+async function* cumulativeText(body: ReadableStream<Uint8Array>) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    yield text;
+  }
+}
+
+function formatConversationTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "最近";
+  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" }).format(date);
 }
 
 function Recommendation({ icon: Icon, title, text, source, editing, onEdit }: { icon: typeof Dumbbell; title: string; text: string; source: string; editing: boolean; onEdit: () => void }) {

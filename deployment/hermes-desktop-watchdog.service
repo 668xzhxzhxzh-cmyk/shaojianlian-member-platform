@@ -1,0 +1,13 @@
+[Unit]
+Description=Hermes Desktop backend application health watchdog
+After=network-online.target hermes-desktop-serve.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/shao-coach/scripts/hermes-desktop-watchdog.sh
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run
+

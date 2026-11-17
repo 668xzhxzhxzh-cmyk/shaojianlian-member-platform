@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { memberRows } from "@/lib/portal-data";
+import { portalFetch } from "@/lib/portal-auth";
 import { usePortal } from "./portal-context";
 import { Avatar, Card, Ring, SectionTitle, StatCard, TrendChart } from "./ui";
 
@@ -48,7 +49,7 @@ async function copyTemporaryPassword(password: string) {
 }
 
 export function CoachView({ openAssistant }: { openAssistant: () => void }) {
-  const { state, updateSuggestion, notify } = usePortal();
+  const { state, role, updateSuggestion, notify } = usePortal();
   const [search, setSearch] = useState("");
   const [risk, setRisk] = useState("全部风险等级");
   const [newMemberOpen, setNewMemberOpen] = useState(false);
@@ -60,7 +61,7 @@ export function CoachView({ openAssistant }: { openAssistant: () => void }) {
     const data = new FormData(event.currentTarget);
     const name = String(data.get("name") || "");
     try {
-      const response = await fetch("/api/users", {
+      const response = await portalFetch("/api/users", role, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, phone: data.get("phone"), role: "member" }),
@@ -155,7 +156,7 @@ function Task({ icon: Icon, label, count, onClick }: { icon: typeof MessageCircl
 type AdminSection = "overview" | "ai-suggestions" | "notifications" | "users" | "settings";
 type AdminUser = { id: string; name: string; role: string; phone: string; status: string };
 type IntegrationHealth = {
-  deepseek: boolean | null;
+  ai: boolean | null;
   memberTools: boolean | null;
   wecomContact: boolean | null;
   wecomCallback: boolean | null;
@@ -167,7 +168,7 @@ function IntegrationBadge({ value, ready, unavailable }: { value: boolean | null
 }
 
 export function AdminView({ section = "overview" }: { section?: AdminSection }) {
-  const { state, notify, updateSuggestion } = usePortal();
+  const { state, role, notify, updateSuggestion } = usePortal();
   const [accountOpen, setAccountOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [suggestionFilter, setSuggestionFilter] = useState<"全部" | "待确认" | "草稿" | "已发送">("全部");
@@ -186,7 +187,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
     { id: "n3", title: "会员身体数据已更新", detail: "张伟新增体重与体脂记录", read: true },
   ]);
   const [settings, setSettings] = useState({ city: "鄂州", timezone: "Asia/Shanghai", hermesAutoSync: true, memberRegistration: true });
-  const [integrationHealth, setIntegrationHealth] = useState<IntegrationHealth>({ deepseek: null, memberTools: null, wecomContact: null, wecomCallback: null, wecomApp: null });
+  const [integrationHealth, setIntegrationHealth] = useState<IntegrationHealth>({ ai: null, memberTools: null, wecomContact: null, wecomCallback: null, wecomApp: null });
   const visibleUsers = users.filter((user) => !search || `${user.name}${user.role}${user.phone}${user.status}`.includes(search));
   const integrationValues = Object.values(integrationHealth);
   const healthyIntegrationCount = integrationValues.filter((value) => value === true).length;
@@ -194,7 +195,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
   const integrationHealthDegraded = integrationValues.some((value) => value === false);
 
   useEffect(() => {
-    fetch("/api/users", { credentials: "include" })
+    portalFetch("/api/users", role)
       .then(async (response) => {
         if (!response.ok) return;
         const result = await response.json() as { users?: Array<{ id: string; name: string; role: string; phone: string; status: string }> };
@@ -206,7 +207,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
         })));
       })
       .catch(() => undefined);
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -214,10 +215,10 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
       .then(async (response) => {
         if (!response.ok) throw new Error("health unavailable");
         const result = await response.json() as {
-          integrations?: { deepseek?: boolean; hermesMemberTools?: boolean; wecomContact?: boolean; wecomCallback?: boolean; wecomApp?: boolean };
+          integrations?: { ai?: boolean; hermesMemberTools?: boolean; wecomContact?: boolean; wecomCallback?: boolean; wecomApp?: boolean };
         };
         setIntegrationHealth({
-          deepseek: Boolean(result.integrations?.deepseek),
+          ai: Boolean(result.integrations?.ai),
           memberTools: Boolean(result.integrations?.hermesMemberTools),
           wecomContact: Boolean(result.integrations?.wecomContact),
           wecomCallback: Boolean(result.integrations?.wecomCallback),
@@ -226,7 +227,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setIntegrationHealth({ deepseek: false, memberTools: false, wecomContact: false, wecomCallback: false, wecomApp: false });
+        setIntegrationHealth({ ai: false, memberTools: false, wecomContact: false, wecomCallback: false, wecomApp: false });
       });
     return () => controller.abort();
   }, []);
@@ -254,7 +255,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
     const name = String(data.get("name") || "");
     const roleMap: Record<string, string> = { "会员": "member", "教练": "coach", "管理员": "admin" };
     try {
-      const response = await fetch("/api/users", {
+      const response = await portalFetch("/api/users", role, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, phone: data.get("phone"), role: roleMap[String(data.get("role"))] || "member" }),
@@ -280,16 +281,15 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
     event.preventDefault();
     if (!managedUser) return;
     const data = new FormData(event.currentTarget);
-    const role = String(data.get("role") || managedUser.role);
+    const managedRole = String(data.get("role") || managedUser.role);
     const status = String(data.get("status") || managedUser.status);
-    const next = { ...managedUser, role, status };
+    const next = { ...managedUser, role: managedRole, status };
     setUsers((current) => current.map((user) => user.id === next.id ? next : user));
     try {
-      await fetch("/api/users", {
+      await portalFetch("/api/users", role, {
         method: "PATCH",
-        credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: next.id, role: role === "管理员" ? "admin" : role === "教练" ? "coach" : "member", status: status === "正常" ? "active" : "disabled" }),
+        body: JSON.stringify({ id: next.id, role: managedRole === "管理员" ? "admin" : managedRole === "教练" ? "coach" : "member", status: status === "正常" ? "active" : "disabled" }),
       });
     } catch {}
     notify(`${next.name} 的账户权限已更新`);
@@ -307,7 +307,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
           <StatCard icon={Sparkles} label="待确认" value={count("待确认")} suffix="条" note="等待教练确认" accent="amber" />
           <StatCard icon={FileDown} label="草稿" value={count("草稿")} suffix="条" note="仍可继续编辑" />
           <StatCard icon={Send} label="已创建任务" value={count("已发送")} suffix="条" note="不代表会员已收到" accent="slate" />
-          <StatCard icon={ShieldCheck} label="合规复核" value="100" suffix="%" note="发送前需人工确认" />
+          <StatCard icon={ShieldCheck} label="合规复核" value="100" suffix="%" note="决策消息人工确认" />
         </div>
         <Card className="admin-ai-board">
           <div className="admin-ai-toolbar"><div><h2>建议处理队列</h2><p>按状态筛选并查看完整证据、风险和发送状态。</p></div><div className="admin-ai-filters">{(["全部", "待确认", "草稿", "已发送"] as const).map((filter) => <button key={filter} className={suggestionFilter === filter ? "active" : ""} onClick={() => setSuggestionFilter(filter)}>{filter}<em>{filter === "全部" ? state.suggestions.length : count(filter)}</em></button>)}</div></div>
@@ -323,7 +323,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
               <span className="eyebrow">管理员审核 · {selectedSuggestion.category}</span><h2>{selectedSuggestion.member} · {selectedSuggestion.title}</h2>
               <div className="admin-suggestion-meta"><span>优先级 <b>{selectedSuggestion.priority}</b></span><span>当前状态 <b>{selectedSuggestion.status}</b></span><span>生成来源 <b>AI + 会员真实记录</b></span></div>
               <article className="admin-suggestion-content"><b>建议内容</b><p>{selectedSuggestion.content}</p></article>
-              <div className="admin-review-checks"><span><Check size={16} /> 已绑定唯一会员档案</span><span><Check size={16} /> 未包含医疗诊断</span><span><Check size={16} /> 发送前仍需教练在企业微信确认</span></div>
+              <div className="admin-review-checks"><span><Check size={16} /> 已绑定唯一会员档案</span><span><Check size={16} /> 未包含医疗诊断</span><span><Check size={16} /> 决策建议仍需教练审批</span></div>
               <p className="admin-send-warning"><AlertTriangle size={17} /> 创建发送任务不代表会员已收到；未取得实际发送状态前，系统不会显示“会员已收到”。</p>
               <div className="session-detail-actions"><button className="button button-secondary" onClick={() => { updateSuggestion(selectedSuggestion.id, "草稿", { silent: true }); setSelectedSuggestionId(null); notify("建议已退回草稿，等待教练修改", "info"); }}>退回修改</button><button className="button button-primary" onClick={() => { updateSuggestion(selectedSuggestion.id, "待确认", { silent: true }); setSelectedSuggestionId(null); notify("审核完成，等待教练在企业微信确认发送"); }}>通过审核</button></div>
             </section>
@@ -372,10 +372,10 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
               )}
             />
             <div className="integration-status-grid">
-              <button onClick={() => showIntegrationStatus("DeepSeek", integrationHealth.deepseek)}>
+              <button onClick={() => showIntegrationStatus("AI", integrationHealth.ai)}>
                 <span className="integration-icon"><Sparkles size={21} /></span>
-                <span><b>AI 分析服务</b><small>DeepSeek V4 Flash</small></span>
-                <IntegrationBadge value={integrationHealth.deepseek} ready="运行正常" unavailable="未配置" /><ArrowRight size={16} />
+                <span><b>AI 分析服务</b><small>智能推理服务</small></span>
+                <IntegrationBadge value={integrationHealth.ai} ready="运行正常" unavailable="未配置" /><ArrowRight size={16} />
               </button>
               <button onClick={() => showIntegrationStatus("AI 网站管理工具", integrationHealth.memberTools)}>
                 <span className="integration-icon"><Bot size={21} /></span>
@@ -398,7 +398,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
                 <IntegrationBadge value={integrationHealth.wecomApp} ready="已接入" unavailable="待配置" /><ArrowRight size={16} />
               </button>
             </div>
-            <p className="integration-footnote"><ShieldCheck size={16} /> 所有管理操作均记录审计日志，会员消息仍需教练确认发送。</p>
+            <p className="integration-footnote"><ShieldCheck size={16} /> 日常提醒无需聊天内审批；企业微信客户端确认、频控与发送状态仍按官方规则执行。</p>
           </Card>
         </div>
       </div>
@@ -453,7 +453,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
       <div className="admin-grid">
         <Card className="span-2">
           <SectionTitle title="平台运行状态" />
-          <div className="service-grid"><Service icon={Cloud} name="网站服务" detail="鄂州业务站运行正常" /><Service icon={Database} name="业务数据库" detail="PostgreSQL 持久化正常" /><Service icon={Bot} name="AI 分析服务" detail="DeepSeek V4 Flash 已接入" /><Service icon={MessageCircleMore} name="企业微信自建应用" detail={integrationHealth.wecomCallback && integrationHealth.wecomApp ? "官方回调与应用消息 · 已接入" : "官方回调与应用消息 · 待配置"} /></div>
+          <div className="service-grid"><Service icon={Cloud} name="网站服务" detail="鄂州业务站运行正常" /><Service icon={Database} name="业务数据库" detail="PostgreSQL 持久化正常" /><Service icon={Bot} name="AI 分析服务" detail="智能分析能力已接入" /><Service icon={MessageCircleMore} name="企业微信自建应用" detail={integrationHealth.wecomCallback && integrationHealth.wecomApp ? "官方回调与应用消息 · 已接入" : "官方回调与应用消息 · 待配置"} /></div>
         </Card>
         <Card>
           <SectionTitle title="安全与合规" />
@@ -468,7 +468,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
         <Card>
           <SectionTitle title="集成设置" />
           <div className="integration-list">
-            <button onClick={() => notify("DeepSeek 连接测试已提交")}><span><Sparkles size={20} /><b>DeepSeek API</b></span><em className="ok">已接入</em><ArrowRight size={16} /></button>
+            <button onClick={() => notify("AI 连接测试已提交")}><span><Sparkles size={20} /><b>AI 服务</b></span><em className="ok">已接入</em><ArrowRight size={16} /></button>
             <button onClick={() => showIntegrationStatus("企业微信自建应用", Boolean(integrationHealth.wecomCallback && integrationHealth.wecomApp))}><span><MessageCircleMore size={20} /><b>教练自建应用</b></span><em className={integrationHealth.wecomCallback && integrationHealth.wecomApp ? "ok" : ""}>{integrationHealth.wecomCallback && integrationHealth.wecomApp ? "已接入" : "待配置"}</em><ArrowRight size={16} /></button>
             <button onClick={() => notify("备份任务状态正常；最近一次恢复演练待执行", "info")}><span><Database size={20} /><b>数据备份</b></span><em className="ok">正常</em><ArrowRight size={16} /></button>
           </div>

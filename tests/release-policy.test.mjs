@@ -54,14 +54,63 @@ test("release controller verifies, stages, health-checks and rolls back", async 
   assert.match(controller, /PORT=3300/);
   assert.match(controller, /scripts\/backup-postgres\.sh/);
   assert.match(controller, /enable --now shao-backup\.timer/);
+  assert.match(controller, /enable --now hermes-desktop-watchdog\.timer/);
+  assert.match(controller, /hermes-desktop-watchdog\.sh" --repair/);
   assert.match(controller, /atomic_link "\$release_dir" "\$base_dir\/current"/);
   assert.match(controller, /新版本验证失败，正在自动恢复旧版本/);
   assert.match(controller, /release_dirs/);
   assert.match(packageScript, /npm ci --prefix "\$stage\/release" --omit=dev/);
   assert.match(packageScript, /scripts\/backup-postgres\.sh/);
+  assert.match(packageScript, /scripts\/hermes-desktop-watchdog\.sh/);
+  assert.match(packageScript, /cp -a "\$repo_root\/lib" "\$stage\/release\/lib"/);
   assert.match(packageScript, /运行包疑似包含真实密钥/);
   assert.match(webService, /\/opt\/shao-coach\/current\/web\/server\.js/);
   assert.match(apiService, /\/opt\/shao-coach\/current\/server\/index\.mjs/);
+});
+
+test("production package includes the real Hermes vision probe", async () => {
+  const packageScript = await read("scripts/package-production.sh");
+  const archiveVerification = await read("scripts/verify-release-archive.sh");
+  const runtimeConfiguration = await read("scripts/configure-production-runtime.sh");
+  assert.match(packageScript, /verify-vision-runtime\.mjs/);
+  assert.match(archiveVerification, /verify-vision-runtime\.mjs/);
+  assert.match(runtimeConfiguration, /verify-vision-runtime\.mjs/);
+});
+
+test("production WeChat status inspection is read-only and sanitized", async () => {
+  const deploy = await read(".github/workflows/deploy.yml");
+  const inspector = await read("scripts/inspect-wecom-customer-status.mjs");
+  assert.match(deploy, /VERIFY_WECOM/);
+  assert.match(deploy, /verify-wecom:/);
+  assert.match(inspector, /SELECT msg_id,msg_type,status,result,attempt_count,error_message,sent_at,created_at,updated_at/);
+  assert.match(inspector, /wecom_customer_service_callback/);
+  assert.match(inspector, /\/var\/log\/nginx\/access\.log/);
+  assert.match(inspector, /journalctl/);
+  assert.match(inspector, /apiUpstreamPort/);
+  assert.doesNotMatch(inspector, /SELECT[^;]*(?:external_userid|member_id|turns_json|payload_json)/i);
+  assert.doesNotMatch(inspector, /callbackAccess[^]*msg_signature/i);
+  assert.doesNotMatch(
+    inspector,
+    /\b(?:INSERT\s+INTO|UPDATE\s+\w|DELETE\s+FROM|TRUNCATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b/i,
+  );
+});
+
+test("production routes the only WeCom callback through the website API", async () => {
+  const [deploy, route, packageScript, archiveVerification] = await Promise.all([
+    read(".github/workflows/deploy.yml"),
+    read("scripts/configure-wecom-callback-route.sh"),
+    read("scripts/package-production.sh"),
+    read("scripts/verify-release-archive.sh"),
+  ]);
+  assert.match(deploy, /configure-wecom-callback-route\.sh/);
+  assert.match(deploy, /Route WeChat customer-service callbacks to the website API/);
+  assert.match(route, /BEGIN SHAO HERMES WECOM CALLBACK/);
+  assert.match(route, /127\.0\.0\.1:8788/);
+  assert.match(route, /restore_route/);
+  assert.match(route, /nginx -t/);
+  assert.match(route, /callback_status/);
+  assert.match(packageScript, /configure-wecom-callback-route\.sh/);
+  assert.match(archiveVerification, /configure-wecom-callback-route\.sh/);
 });
 
 test("project Skill and AGENTS rules require verification before completion", async () => {

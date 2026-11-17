@@ -5,6 +5,7 @@ web_base="http://127.0.0.1:3000"
 api_base="http://127.0.0.1:8788"
 public_base=""
 check_services=0
+check_hermes=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -12,6 +13,7 @@ while [[ $# -gt 0 ]]; do
     --api-base) api_base="$2"; shift 2 ;;
     --public-base) public_base="$2"; shift 2 ;;
     --check-services) check_services=1; shift ;;
+    --check-hermes) check_hermes=1; shift ;;
     *) echo "未知参数：$1" >&2; exit 2 ;;
   esac
 done
@@ -58,6 +60,18 @@ if [[ "$check_services" == 1 ]]; then
   systemctl is-active --quiet shao-web.service
   systemctl is-active --quiet nginx.service
   echo "OK systemd shao-api/shao-web/nginx active"
+fi
+
+if [[ "$check_hermes" == 1 ]]; then
+  systemctl is-active --quiet hermes-gateway.service
+  systemctl is-active --quiet hermes-desktop-serve.service
+  systemctl is-active --quiet hermes-desktop-watchdog.timer
+  hermes_status="$(curl -fsS --max-time 5 http://127.0.0.1:9119/api/status)"
+  grep -q '"version"\|"status"' <<<"$hermes_status" || {
+    echo "Hermes Desktop backend 状态响应无效。" >&2
+    exit 1
+  }
+  echo "OK Hermes gateway/desktop/watchdog active and responsive"
 fi
 
 echo "RELEASE_HEALTH_OK"

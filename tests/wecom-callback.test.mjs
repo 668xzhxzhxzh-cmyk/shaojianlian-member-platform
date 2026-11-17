@@ -108,10 +108,71 @@ test("WeCom callback AES-decrypts POST messages before dispatch", async () => {
     msgType: "text",
     content: "查询会员 member-1",
     event: "",
+    changeType: "",
+    userId: "",
+    externalUserId: "",
+    state: "",
+    welcomeCode: "",
     agentId: "1000002",
     msgId: "msg-1",
+    kfToken: "",
+    openKfId: "",
     receiverId: corpId,
   });
+});
+
+test("WeCom callback acknowledges before slow agent processing finishes", async () => {
+  configure();
+  let started = false;
+  let releaseAgent;
+  const agentFinished = new Promise((resolve) => { releaseAgent = resolve; });
+  const service = createWecomCallbackService({
+    onMessage: async () => {
+      started = true;
+      await agentFinished;
+    },
+  });
+  const innerXml = `<xml><ToUserName><![CDATA[${corpId}]]></ToUserName><FromUserName><![CDATA[coach-1]]></FromUserName><CreateTime>1785590400</CreateTime><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[分析会员训练计划]]></Content><AgentID>1000002</AgentID><MsgId>msg-slow-agent</MsgId></xml>`;
+  const encrypted = encrypt(innerXml);
+  const url = callbackUrl(encrypted);
+  url.searchParams.delete("echostr");
+  const res = response();
+
+  await service.handle(
+    request("POST", `<xml><Encrypt><![CDATA[${encrypted}]]></Encrypt></xml>`),
+    res,
+    url,
+  );
+
+  assert.equal(started, true);
+  assert.equal(res.status, 200);
+  assert.equal(res.body, "success");
+  releaseAgent();
+});
+
+test("WeCom callback dispatches an authenticated add-customer event by coach UserID", async () => {
+  configure();
+  let received;
+  let coachMessageDispatched = false;
+  const service = createWecomCallbackService({
+    onMessage: async () => { coachMessageDispatched = true; },
+    onContactEvent: async (message) => { received = message; },
+  });
+  const innerXml = `<xml><ToUserName><![CDATA[${corpId}]]></ToUserName><FromUserName><![CDATA[sys]]></FromUserName><CreateTime>1785590401</CreateTime><MsgType><![CDATA[event]]></MsgType><Event><![CDATA[change_external_contact]]></Event><ChangeType><![CDATA[add_external_contact]]></ChangeType><UserID><![CDATA[coach-1]]></UserID><ExternalUserID><![CDATA[wm-customer-1]]></ExternalUserID><State><![CDATA[sb_12345678901234567890]]></State><WelcomeCode><![CDATA[welcome-1]]></WelcomeCode></xml>`;
+  const encrypted = encrypt(innerXml);
+  const url = callbackUrl(encrypted);
+  url.searchParams.delete("echostr");
+  const res = response();
+  await service.handle(request("POST", `<xml><Encrypt><![CDATA[${encrypted}]]></Encrypt></xml>`), res, url);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body, "success");
+  assert.equal(coachMessageDispatched, false);
+  assert.equal(received.userId, "coach-1");
+  assert.equal(received.externalUserId, "wm-customer-1");
+  assert.equal(received.changeType, "add_external_contact");
+  assert.equal(received.state, "sb_12345678901234567890");
 });
 
 test("WeCom callback acknowledges but never dispatches unauthorized users", async () => {
@@ -128,4 +189,24 @@ test("WeCom callback acknowledges but never dispatches unauthorized users", asyn
   assert.equal(res.status, 200);
   assert.equal(res.body, "success");
   assert.equal(dispatched, false);
+});
+
+test("WeCom callback dispatches an authenticated customer-service event", async () => {
+  configure();
+  let received;
+  const service = createWecomCallbackService({
+    onCustomerServiceEvent: async (message) => { received = message; },
+  });
+  const innerXml = `<xml><ToUserName><![CDATA[${corpId}]]></ToUserName><FromUserName><![CDATA[sys]]></FromUserName><CreateTime>1785590402</CreateTime><MsgType><![CDATA[event]]></MsgType><Event><![CDATA[kf_msg_or_event]]></Event><Token><![CDATA[sync-token-1]]></Token><OpenKfId><![CDATA[wk-test-1]]></OpenKfId></xml>`;
+  const encrypted = encrypt(innerXml);
+  const url = callbackUrl(encrypted);
+  url.searchParams.delete("echostr");
+  const res = response();
+  await service.handle(request("POST", `<xml><Encrypt><![CDATA[${encrypted}]]></Encrypt></xml>`), res, url);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(res.status, 200);
+  assert.equal(received.event, "kf_msg_or_event");
+  assert.equal(received.kfToken, "sync-token-1");
+  assert.equal(received.openKfId, "wk-test-1");
 });
