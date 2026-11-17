@@ -179,8 +179,8 @@ test("separates administrator and coach accounts, portals, and permissions", asy
   assert.match(server, /managementAction && session\.role !== "coach"/);
   assert.match(server, /if \(session\.role !== "coach"\)/);
   assert.match(server, /WHERE role='member'/);
-  assert.match(adminView, /name: "系统管理员", role: "管理员"/);
-  assert.match(adminView, /name: "邵教练", role: "教练"/);
+  assert.match(adminView, /useState<AdminUser\[\]>\(\[\]\)/);
+  assert.doesNotMatch(adminView, /name: "系统管理员", role: "管理员"/);
   assert.match(css, /\.admin-login-page \.login-brand-panel/);
   assert.match(css, /\.coach-login-page \.login-brand-panel/);
   assert.match(adminLoginRoute, /initialView="admin"/);

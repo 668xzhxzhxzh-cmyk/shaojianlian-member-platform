@@ -7,7 +7,6 @@ import {
   Apple,
   ArrowRight,
   CalendarCheck,
-  CalendarDays,
   Check,
   ChevronRight,
   ClipboardCheck,
@@ -52,21 +51,6 @@ type CoachWorkspaceProps = {
   openAssistant: () => void;
 };
 
-const coachSchedule = [
-  { id: "cs-1", date: "07/31", day: "今天", time: "08:00", member: "李明远", focus: "下肢力量与髋稳定", status: "已完成" },
-  { id: "cs-2", date: "07/31", day: "今天", time: "09:30", member: "王雨桐", focus: "体态评估与肩颈松解", status: "待开始" },
-  { id: "cs-3", date: "07/31", day: "今天", time: "11:00", member: "张小北", focus: "上肢拉力与核心", status: "待开始" },
-  { id: "cs-4", date: "07/31", day: "今天", time: "14:00", member: "陈思颖", focus: "核心重建", status: "待开始" },
-  { id: "cs-5", date: "07/31", day: "今天", time: "16:00", member: "刘一航", focus: "膝关节活动度", status: "待确认" },
-  { id: "cs-6", date: "08/01", day: "周六", time: "09:00", member: "李明远", focus: "上肢拉力与肩胛控制", status: "已确认" },
-  { id: "cs-7", date: "08/01", day: "周六", time: "14:30", member: "王雨桐", focus: "全身燃脂循环", status: "已确认" },
-  { id: "cs-8", date: "08/02", day: "周日", time: "10:00", member: "张小北", focus: "动作评估与计划复盘", status: "待确认" },
-  { id: "cs-9", date: "08/03", day: "周一", time: "18:30", member: "陈思颖", focus: "核心稳定进阶", status: "已确认" },
-  { id: "cs-10", date: "08/06", day: "周四", time: "19:00", member: "刘一航", focus: "下肢活动度与稳定", status: "已确认" },
-  { id: "cs-11", date: "08/12", day: "周三", time: "18:00", member: "李明远", focus: "阶段体测与负荷调整", status: "已确认" },
-  { id: "cs-12", date: "08/20", day: "周四", time: "19:30", member: "王雨桐", focus: "月度复盘与计划迭代", status: "待确认" },
-];
-
 export function CoachWorkspace({
   section,
   selectedMemberId,
@@ -84,7 +68,7 @@ export function CoachWorkspace({
     saveBodyFeedback,
     updateMemberProfile,
   } = usePortal();
-  const [members, setMembers] = useState<CoachMember[]>(memberRows);
+  const [members, setMembers] = useState<CoachMember[]>([]);
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? members[0];
   const sectionLabels: Record<CoachSection, string> = {
     overview: "工作台",
@@ -103,11 +87,17 @@ export function CoachWorkspace({
         const result = await response.json() as { users?: Array<{ id: string; name: string; phone: string; role: string; status: string }> };
         const actualMembers = result.users?.filter((user) => Boolean(user.id) && user.role === "member" && user.status === "active") ?? [];
         if (!actualMembers.length) return;
-        setMembers(actualMembers.map((user, index) => ({
-          ...memberRows[index % memberRows.length],
+        setMembers(actualMembers.map((user) => ({
           id: user.id,
           name: user.name,
           phone: user.phone,
+          plan: "由教练在档案中设置",
+          goal: "进入档案查看",
+          recovery: 0,
+          attendance: 0,
+          risk: "待评估",
+          next: "待安排",
+          last: "—",
         })));
       })
       .catch(() => undefined);
@@ -122,6 +112,8 @@ export function CoachWorkspace({
           onSelectMember={onSelectMember}
           members={members}
         />
+      ) : !selectedMember ? (
+        <div className="empty-hint">正在加载会员列表，请稍候…</div>
       ) : (
         <>
           <section className="coach-section-heading">
@@ -160,11 +152,21 @@ function CoachOverview({
 }) {
   const { state } = usePortal();
   const pending = state.suggestions.filter((item) => item.status === "待确认").length;
-  const [scheduleRange, setScheduleRange] = useState<"day" | "week" | "month">("day");
-  const [selectedSession, setSelectedSession] = useState<(typeof coachSchedule)[number] | null>(null);
   const [recapOpen, setRecapOpen] = useState(false);
-  const visibleSchedule = coachSchedule.slice(0, scheduleRange === "day" ? 5 : scheduleRange === "week" ? 9 : 12);
-  const rangeTitle = scheduleRange === "day" ? "今日私教安排" : scheduleRange === "week" ? "本周私教安排" : "本月私教安排";
+  const realMembers = members.filter((member) => Boolean(member.id) && Boolean(member.name));
+  const completedMeals = state.meals.filter((meal) => meal.completed);
+  const mealCalories = completedMeals.reduce((sum, meal) => sum + meal.calories, 0);
+  const calorieTarget = state.nutritionPlan?.calories ?? 0;
+  const nutritionPercent = calorieTarget > 0 ? Math.min(100, Math.round((mealCalories / calorieTarget) * 100)) : 0;
+  const waterPercent = Math.min(100, Math.round((state.waterMl / 2000) * 100));
+  const scheduled = state.bookings.filter((booking) => !["可预约", "已取消"].includes(booking.status));
+  const doneBookings = state.bookings.filter((booking) => booking.status === "已完成");
+  const bookingPercent = scheduled.length > 0 ? Math.min(100, Math.round((doneBookings.length / scheduled.length) * 100)) : 0;
+  const totalSuggestions = state.suggestions.length;
+  const sentSuggestions = state.suggestions.filter((item) => item.status === "已发送").length;
+  const suggestionPercent = totalSuggestions > 0 ? Math.min(100, Math.round((sentSuggestions / totalSuggestions) * 100)) : 0;
+  const latestMetric = state.bodyMetrics.at(-1);
+  const weekRange = currentWeekRange();
   return (
     <>
       <section className="coach-hero-row">
@@ -179,93 +181,98 @@ function CoachOverview({
         </div>
       </section>
       <div className="stats-grid four coach-kpis">
-        <StatCard icon={CalendarDays} label="今日一对一私教" value="5" suffix="节" note="首节 08:00" onClick={() => goTo("coach-schedule", "/coach/schedule", "课程排期")} />
-        <StatCard icon={UsersRound} label="活跃会员" value="28" suffix="人" note="3 人需要跟进" onClick={() => goTo("coach-members", "/coach/members", "会员管理")} />
-        <StatCard icon={AlertTriangle} label="身体风险提醒" value="3" suffix="项" note="1 项需今日处理" accent="amber" onClick={() => goTo("coach-body", "/coach/body", "身体反馈")} />
+        <StatCard icon={UsersRound} label="活跃会员" value={realMembers.length} suffix="人" note="来自会员账号列表" onClick={() => goTo("coach-members", "/coach/members", "会员管理")} />
         <StatCard icon={Sparkles} label="AI 待确认" value={pending} suffix="条" note="确认后创建企微任务" accent="slate" onClick={openAssistant} />
+        <StatCard icon={CalendarCheck} label="当前会员连续打卡" value={state.streak} suffix="天" note={state.profile.name || "未选择会员"} onClick={() => goTo("coach-body", "/coach/body", "身体反馈")} />
+        <StatCard icon={Activity} label="当前会员身体记录" value={state.bodyMetrics.length} suffix="条" note={latestMetric ? `最近 ${latestMetric.date}` : "暂无记录"} accent="amber" onClick={() => goTo("coach-body", "/coach/body", "身体反馈")} />
       </div>
       <div className="coach-overview-grid">
         <Card className="coach-today-card span-2">
-          <SectionTitle title={rangeTitle} action={<div className="schedule-range-switch" aria-label="排期范围">{(["day", "week", "month"] as const).map((range) => <button key={range} className={scheduleRange === range ? "active" : ""} onClick={() => setScheduleRange(range)}>{range === "day" ? "日" : range === "week" ? "周" : "月"}</button>)}</div>} />
-          <div className={`coach-timeline coach-timeline-${scheduleRange}`}>
-            {visibleSchedule.map((item, index) => {
-              const member = members[index % members.length];
-              return (
-              <button key={item.id} onClick={() => setSelectedSession({ ...item, member: member?.name ?? item.member })}>
-                <time><small>{item.day}</small>{item.time}</time>
-                <i className={index === 0 ? "done" : index === 1 ? "active" : ""} />
-                <Avatar name={member?.name ?? item.member} size="sm" />
-                <span><b>{member?.name ?? item.member}</b><small>{item.date} · {item.focus}</small></span>
-                <em>{item.status}</em>
-                <ChevronRight size={16} />
-              </button>
-              );
-            })}
-          </div>
+          <SectionTitle title="课程排期" action={<span className="pill">按会员查看与调整</span>} />
+          {scheduled.length ? (
+            <div className="coach-timeline coach-timeline-day">
+              {scheduled.slice(0, 5).map((booking, index) => (
+                <button key={booking.id} onClick={() => goTo("coach-schedule", "/coach/schedule", "课程排期")}>
+                  <time><small>{booking.day}</small>{booking.time}</time>
+                  <i className={index === 0 ? "active" : ""} />
+                  <Avatar name={state.profile.name || "会员"} size="sm" />
+                  <span><b>{state.profile.name || "当前会员"}</b><small>{booking.date} · {booking.focus || "一对一私教"}</small></span>
+                  <em>{booking.status}</em>
+                  <ChevronRight size={16} />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-hint">总览展示当前会员（{state.profile.name || "未选择"}）的课程排期。选择会员后，可在「课程排期」中安排一对一私教。</div>
+          )}
           <button className="schedule-full-link" onClick={() => goTo("coach-schedule", "/coach/schedule", "课程排期")}>进入完整课程排期 <ArrowRight size={15} /></button>
         </Card>
         <Card>
           <SectionTitle title="今日优先事项" />
           <div className="priority-list">
-            <button onClick={() => goTo("coach-body", "/coach/body", "身体反馈")}><AlertTriangle size={19} /><span><b>刘一航 · 膝部不适</b><small>训练前完成风险复核</small></span><em>高</em></button>
-            <button onClick={() => goTo("coach-nutrition", "/coach/nutrition", "饮食方案")}><Apple size={19} /><span><b>王雨桐 · 摄入不足</b><small>调整今日餐单</small></span><em>中</em></button>
-            <button onClick={openAssistant}><MessageCircleMore size={19} /><span><b>{pending} 条建议待确认</b><small>由教练确认后创建企微任务</small></span><em>待办</em></button>
+            <button onClick={openAssistant}><Sparkles size={19} /><span><b>{pending} 条 AI 建议待确认</b><small>由教练确认后创建企微任务</small></span><em>待办</em></button>
+            <button onClick={() => goTo("coach-body", "/coach/body", "身体反馈")}><Activity size={19} /><span><b>身体反馈</b><small>记录并回复当前会员身体数据</small></span><em>跟进</em></button>
+            <button onClick={() => goTo("coach-nutrition", "/coach/nutrition", "饮食方案")}><Apple size={19} /><span><b>饮食方案</b><small>为当前会员调整饮食计划</small></span><em>跟进</em></button>
           </div>
         </Card>
         <Card className="span-2">
-          <SectionTitle title="会员状态快照" action={<button className="text-button" onClick={() => goTo("coach-members", "/coach/members", "会员管理")}>查看全部会员 <ArrowRight size={15} /></button>} />
+          <SectionTitle title="会员快照" action={<button className="text-button" onClick={() => goTo("coach-members", "/coach/members", "会员管理")}>查看全部会员 <ArrowRight size={15} /></button>} />
           <div className="member-snapshot-grid">
-            {members.slice(0, 4).map((member) => (
+            {realMembers.length === 0 ? <div className="empty-hint">暂无活跃会员账号。</div> : realMembers.slice(0, 4).map((member) => (
               <button key={member.id} onClick={() => {
                 onSelectMember(member.id);
                 goTo("coach-members", "/coach/members", "会员管理");
               }}>
-                <div><Avatar name={member.name} /><span><b>{member.name}</b><small>{member.plan}</small></span><em className={`risk-badge risk-${member.risk}`}>{member.risk}</em></div>
-                <p>{member.goal}</p>
-                <div className="snapshot-metrics"><span>恢复 <b>{member.recovery}%</b></span><span>出勤 <b>{member.attendance}%</b></span><span>下次 <b>{member.next}</b></span></div>
+                <div><Avatar name={member.name} /><span><b>{member.name}</b><small>{member.phone}</small></span></div>
+                <p>进入档案查看训练、饮食与身体数据</p>
+                <div className="snapshot-metrics"><span>账号状态 <b>正常</b></span></div>
               </button>
             ))}
           </div>
         </Card>
         <Card>
-          <SectionTitle title="本周执行质量" />
+          <SectionTitle title="当前会员执行概览" />
           <div className="quality-list">
-            <QualityRow label="训练计划完成率" value={82} />
-            <QualityRow label="私教到课率" value={94} />
-            <QualityRow label="饮食记录完整度" value={76} />
-            <QualityRow label="身体数据更新率" value={68} />
+            <QualityRow label="饮食执行" value={nutritionPercent} />
+            <QualityRow label="饮水目标" value={waterPercent} />
+            <QualityRow label="课程完成" value={bookingPercent} />
+            <QualityRow label="建议处理" value={suggestionPercent} />
           </div>
-          <button className="button button-secondary full" onClick={() => setRecapOpen(true)}><FileText size={17} /> 生成本周复盘</button>
+          <button className="button button-secondary full" onClick={() => setRecapOpen(true)}><FileText size={17} /> 生成运营快照</button>
         </Card>
       </div>
-      {selectedSession ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSelectedSession(null)}>
-          <section className="modal session-detail-modal coach-session-modal" role="dialog" aria-modal="true" aria-label="教练课程详情" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="icon-button modal-close" onClick={() => setSelectedSession(null)} aria-label="关闭"><X size={20} /></button>
-            <span className="eyebrow">{selectedSession.day} · {selectedSession.date}</span>
-            <h2>{selectedSession.member}的私教课</h2>
-            <p>查看课程重点后，可进入会员训练方案继续准备本次课程。</p>
-            <div className="session-detail-date"><Clock3 size={22} /><span><b>{selectedSession.time}</b><small>预计 60–75 分钟</small></span><em>{selectedSession.status}</em></div>
-            <div className="session-detail-grid"><span><Dumbbell size={18} /><small>课程重点</small><b>{selectedSession.focus}</b></span><span><ClipboardCheck size={18} /><small>课前准备</small><b>复核恢复评分与风险提醒</b></span></div>
-            <div className="session-detail-actions"><button className="button button-secondary" onClick={() => { setSelectedSession(null); goTo("coach-schedule", "/coach/schedule", "课程排期"); }}>管理排期</button><button className="button button-primary" onClick={() => { const member = members.find((item) => item.name === selectedSession.member); if (member) onSelectMember(member.id); setSelectedSession(null); goTo("coach-training", "/coach/training", "训练方案"); }}>打开训练方案</button></div>
-          </section>
-        </div>
-      ) : null}
       {recapOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setRecapOpen(false)}>
-          <section className="modal weekly-recap-modal" role="dialog" aria-modal="true" aria-label="本周执行复盘" onMouseDown={(event) => event.stopPropagation()}>
+          <section className="modal weekly-recap-modal" role="dialog" aria-modal="true" aria-label="本周运营快照" onMouseDown={(event) => event.stopPropagation()}>
             <button className="icon-button modal-close" onClick={() => setRecapOpen(false)} aria-label="关闭"><X size={20} /></button>
-            <span className="eyebrow">7 月 27 日—8 月 2 日</span>
-            <h2>本周教练执行复盘</h2>
-            <p>数据已汇总完成。复盘不会自动发送给会员，可继续交给 AI 生成跟进建议。</p>
-            <div className="recap-metrics"><span><small>已完成课程</small><b>18</b><em>节</em></span><span><small>到课率</small><b>94</b><em>%</em></span><span><small>计划完成率</small><b>82</b><em>%</em></span></div>
-            <div className="recap-sections"><article><b>本周亮点</b><p>会员整体到课稳定；李明远的下肢力量计划完成度最高，动作质量持续改善。</p></article><article className="warning"><b>需要跟进</b><p>3 位会员恢复评分偏低，刘一航膝部不适需要在下次训练前完成风险复核。</p></article><article><b>下周建议</b><p>保持主计划不变，为恢复偏低会员减少 10%–15% 训练负荷，并安排一次动作评估。</p></article></div>
-            <div className="session-detail-actions"><button className="button button-secondary" onClick={() => setRecapOpen(false)}>关闭复盘</button><button className="button button-primary" onClick={() => { setRecapOpen(false); openAssistant(); }}><Sparkles size={17} /> 交给 AI 生成建议</button></div>
+            <span className="eyebrow">{weekRange}</span>
+            <h2>本周运营快照</h2>
+            <p>以下数据来自系统真实记录；复盘不会自动发送给会员。</p>
+            <div className="recap-metrics"><span><small>活跃会员</small><b>{realMembers.length}</b><em>人</em></span><span><small>AI 待确认</small><b>{pending}</b><em>条</em></span><span><small>当前会员打卡</small><b>{state.streak}</b><em>天</em></span></div>
+            <div className="recap-sections"><article><b>本周执行</b><p>当前会员饮食执行 {nutritionPercent}%、饮水目标 {waterPercent}%，课程完成 {bookingPercent}%。</p></article><article className="warning"><b>待处理</b><p>{pending} 条 AI 建议等待确认，确认后将创建企业微信发送任务。</p></article><article><b>下一步</b><p>进入「课程排期」安排本周私教，并为当前会员完善训练与饮食方案。</p></article></div>
+            <div className="session-detail-actions"><button className="button button-secondary" onClick={() => setRecapOpen(false)}>关闭</button><button className="button button-primary" onClick={() => { setRecapOpen(false); openAssistant(); }}><Sparkles size={17} /> 交给 AI 生成建议</button></div>
           </section>
         </div>
       ) : null}
     </>
   );
+}
+
+function currentWeekRange() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const utcDay = Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day));
+  const weekday = new Date(utcDay).getUTCDay();
+  const daysSinceMonday = (weekday + 6) % 7;
+  const monday = new Date(utcDay - daysSinceMonday * 86400000);
+  const sunday = new Date(monday.getTime() + 6 * 86400000);
+  const fmt = (date: Date) => `${date.getUTCMonth() + 1} 月 ${date.getUTCDate()} 日`;
+  return `${fmt(monday)} — ${fmt(sunday)}`;
 }
 
 function MemberContextBar({
@@ -310,6 +317,10 @@ function MemberManagement({
   const [search, setSearch] = useState("");
   const [risk, setRisk] = useState("全部状态");
   const [editing, setEditing] = useState(false);
+  const { state } = usePortal();
+  const latestFeedback = state.bodyFeedbacks?.at(-1);
+  const lastDoneBooking = state.bookings.filter((booking) => booking.status === "已完成").at(-1);
+  const nextBooking = state.bookings.find((booking) => !["已完成", "已取消"].includes(booking.status));
   const visibleMembers = members.filter((member) => (!search || `${member.name}${member.phone}${member.goal}`.includes(search)) && (risk === "全部状态" || member.risk === risk));
   const selected = members.find((member) => member.id === selectedMemberId) ?? members[0];
   function saveProfile(event: FormEvent<HTMLFormElement>) {
@@ -343,20 +354,20 @@ function MemberManagement({
       <div className="member-record">
         <Card className="member-record-hero">
           <div><Avatar name={selected.name} size="lg" /><span><span className="eyebrow">MEMBER ID · {selected.id}</span><h2>{selected.name}</h2><small>{selected.phone} · {selected.plan}</small></span></div>
-          <div className="record-hero-stats"><span>当前目标<b>{selected.goal}</b></span><span>恢复评分<b>{selected.recovery} / 100</b></span><span>出勤率<b>{selected.attendance}%</b></span><span>下次私教<b>{selected.next}</b></span></div>
+          <div className="record-hero-stats"><span>当前目标<b>{selected.goal}</b></span><span>恢复评分<b>{selected.recovery > 0 ? `${selected.recovery} / 100` : "待评估"}</b></span><span>出勤率<b>{selected.attendance > 0 ? `${selected.attendance}%` : "待统计"}</b></span><span>下次私教<b>{nextBooking ? `${nextBooking.date} ${nextBooking.time}` : "待安排"}</b></span></div>
           <button className="button button-secondary button-small" onClick={() => setEditing(true)}>编辑会员档案</button>
         </Card>
         <div className="member-service-grid">
-          <MemberServiceCard icon={Dumbbell} title="训练方案" text="第 3 周 · 下肢力量与核心稳定" note="昨天已更新" onClick={() => goTo("coach-training", "/coach/training", "训练方案")} />
-          <MemberServiceCard icon={Apple} title="饮食方案" text="每日 1,800 kcal · 蛋白 120 g" note="执行率 86%" onClick={() => goTo("coach-nutrition", "/coach/nutrition", "饮食方案")} />
-          <MemberServiceCard icon={Activity} title="身体反馈" text={`恢复评分 ${selected.recovery} · ${selected.risk}`} note="今日待复核" onClick={() => goTo("coach-body", "/coach/body", "身体反馈")} />
+          <MemberServiceCard icon={Dumbbell} title="训练方案" text={state.trainingPlan?.phase ? `${state.trainingPlan.phase} · ${state.trainingPlan.focus || "专属训练"}` : "尚未制定训练方案"} note={state.trainingPlan?.updatedAt ? `最近更新 ${state.trainingPlan.updatedAt}` : "等待教练制定"} onClick={() => goTo("coach-training", "/coach/training", "训练方案")} />
+          <MemberServiceCard icon={Apple} title="饮食方案" text={state.nutritionPlan?.calories ? `每日 ${state.nutritionPlan.calories} kcal · 蛋白 ${state.nutritionPlan.protein} g` : "尚未制定饮食方案"} note={state.nutritionPlan?.calories ? "由教练维护" : "等待教练制定"} onClick={() => goTo("coach-nutrition", "/coach/nutrition", "饮食方案")} />
+          <MemberServiceCard icon={Activity} title="身体反馈" text={latestFeedback ? `${latestFeedback.risk} · ${latestFeedback.date}` : "暂无反馈记录"} note={latestFeedback ? "最近一次身体反馈" : "完成评估后生成"} onClick={() => goTo("coach-body", "/coach/body", "身体反馈")} />
         </div>
         <Card>
           <SectionTitle title="最近服务记录" />
           <div className="record-activity-list">
-            <p><CalendarCheck size={18} /><span><b>完成一对一私教</b><small>下肢力量与髋稳定 · 昨天 18:00</small></span></p>
-            <p><ClipboardCheck size={18} /><span><b>训练方案已调整</b><small>深蹲负荷下调 5% · 7 月 28 日</small></span></p>
-            <p><HeartPulse size={18} /><span><b>身体反馈已记录</b><small>睡眠不足，恢复评分下降 · 7 月 27 日</small></span></p>
+            <p><CalendarCheck size={18} /><span><b>{lastDoneBooking ? "完成一对一私教" : "暂无已完成课程"}</b><small>{lastDoneBooking ? `${lastDoneBooking.focus || "一对一私教"} · ${lastDoneBooking.date} ${lastDoneBooking.time}` : "完成课程后自动记录"}</small></span></p>
+            <p><ClipboardCheck size={18} /><span><b>训练方案</b><small>{state.trainingPlan?.updatedAt ? `最近更新 · ${state.trainingPlan.updatedAt}` : "尚未保存训练方案"}</small></span></p>
+            <p><HeartPulse size={18} /><span><b>身体反馈</b><small>{latestFeedback ? `${latestFeedback.risk} · ${latestFeedback.date}` : "尚未记录身体反馈"}</small></span></p>
           </div>
         </Card>
       </div>
@@ -615,7 +626,7 @@ function TrainingDesigner({ member, plan, onSave }: { member: CoachMember; plan:
         </form>
       </Card>
       <div className="side-stack">
-        <Card><SectionTitle title="设计依据" /><div className="evidence-compact"><p><Activity size={18} /><span><b>恢复评分</b><small>{member.recovery} / 100</small></span></p><p><Target size={18} /><span><b>会员目标</b><small>{member.goal}</small></span></p><p><CalendarCheck size={18} /><span><b>出勤率</b><small>{member.attendance}%</small></span></p></div></Card>
+        <Card><SectionTitle title="设计依据" /><div className="evidence-compact"><p><Activity size={18} /><span><b>恢复评分</b><small>{member.recovery > 0 ? `${member.recovery} / 100` : "待评估"}</small></span></p><p><Target size={18} /><span><b>会员目标</b><small>{member.goal}</small></span></p><p><CalendarCheck size={18} /><span><b>出勤率</b><small>{member.attendance > 0 ? `${member.attendance}%` : "待统计"}</small></span></p></div></Card>
         <Card className="coach-note-panel"><SectionTitle title="教练备注" /><textarea value={draft.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))} rows={7} /><small>备注会随训练方案一起自动保存。</small></Card>
       </div>
     </div>
@@ -648,7 +659,7 @@ function NutritionDesigner({ member, plan, onSave }: { member: CoachMember; plan
       </Card>
       <div className="side-stack">
         <Card><SectionTitle title="近 7 天执行" /><QualityRow label="热量达标" value={86} /><QualityRow label="蛋白质达标" value={92} /><QualityRow label="饮水达标" value={72} /></Card>
-        <Card className="warning-card"><AlertTriangle size={22} /><div><b>调整提示</b><p>最近两次私教后饥饿感较强，建议训练日增加 100–150 kcal 复合碳水。</p></div></Card>
+        <Card className="warning-card"><AlertTriangle size={22} /><div><b>调整提示</b><p>根据会员身体反馈与饮食执行记录调整方案；如会员反馈疼痛或不适，请先降低负荷并复核动作。</p></div></Card>
       </div>
     </div>
   );
@@ -667,18 +678,18 @@ function BodyFeedback({
 }) {
   const [metric, setMetric] = useState<"weight" | "bodyFat" | "muscle">("weight");
   const latestFeedback = feedbacks.at(-1);
-  const [summary, setSummary] = useState(latestFeedback?.summary ?? "本周体重和体脂下降节奏稳定，肌肉量保持良好。下一阶段继续以动作质量和稳定训练频率为主。");
-  const [nextFocus, setNextFocus] = useState(latestFeedback?.nextFocus ?? "睡眠时长、膝部疼痛评分、训练后恢复");
+  const [summary, setSummary] = useState(latestFeedback?.summary ?? "");
+  const [nextFocus, setNextFocus] = useState(latestFeedback?.nextFocus ?? "");
   const [risk, setRisk] = useState<"良好" | "注意" | "需关注">(latestFeedback?.risk ?? (member.risk as "良好" | "注意" | "需关注"));
   const latest = data.at(-1);
   const labels = { weight: "体重", bodyFat: "体脂率", muscle: "肌肉量" };
   return (
     <div className="coach-body-layout">
       <div className="stats-grid four">
-        <StatCard icon={Activity} label="恢复评分" value={member.recovery} suffix="/ 100" note={member.risk} accent={member.risk === "良好" ? "green" : "amber"} />
-        <StatCard icon={Target} label="当前体重" value={latest?.weight ?? "67.9"} suffix="kg" note="近 30 天 -1.9 kg" />
-        <StatCard icon={HeartPulse} label="体脂率" value={latest?.bodyFat ?? "14.2"} suffix="%" note="节奏稳定" accent="amber" />
-        <StatCard icon={Dumbbell} label="肌肉量" value={latest?.muscle ?? "35.4"} suffix="kg" note="近 30 天 +0.8 kg" accent="slate" />
+        <StatCard icon={Activity} label="恢复评分" value={member.recovery > 0 ? member.recovery : "—"} suffix={member.recovery > 0 ? "/ 100" : ""} note={member.recovery > 0 ? member.risk : "待评估"} accent={member.risk === "良好" ? "green" : "amber"} />
+        <StatCard icon={Target} label="当前体重" value={latest?.weight ?? "—"} suffix={latest ? "kg" : ""} note={latest ? "最近一次记录" : "暂无记录"} />
+        <StatCard icon={HeartPulse} label="体脂率" value={latest?.bodyFat ?? "—"} suffix={latest ? "%" : ""} note={latest ? "最近一次记录" : "暂无记录"} accent="amber" />
+        <StatCard icon={Dumbbell} label="肌肉量" value={latest?.muscle ?? "—"} suffix={latest ? "kg" : ""} note={latest ? "最近一次记录" : "暂无记录"} accent="slate" />
       </div>
       <div className="content-grid-2">
         <Card>

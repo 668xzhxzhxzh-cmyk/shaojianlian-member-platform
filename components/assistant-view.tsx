@@ -20,7 +20,6 @@ import {
   Utensils,
   X,
 } from "lucide-react";
-import { memberRows } from "@/lib/portal-data";
 import { portalFetch } from "@/lib/portal-auth";
 import { redactConversationText } from "@/lib/public-conversation-text.mjs";
 import { usePortal } from "./portal-context";
@@ -57,12 +56,12 @@ export function AssistantView({
 }) {
   const { state, role, notify, updateSuggestion, refresh } = usePortal();
   const [localMemberId, setLocalMemberId] = useState(selectedMemberId ?? state.profile.id);
-  const [memberOptions, setMemberOptions] = useState(memberRows);
+  const [memberOptions, setMemberOptions] = useState<Array<{ id: string; name: string; phone: string }>>([]);
   const activeMemberId = selectedMemberId ?? localMemberId;
   const selectedProfile = memberOptions.find((member) => member.id === activeMemberId) ?? {
-    ...memberRows[0],
-    id: state.profile.id,
-    name: state.profile.name,
+    id: state.profile.id || "",
+    name: state.profile.name || "未选择会员",
+    phone: "",
   };
   const [messages, setMessages] = useState<ChatMessage[]>([introMessage]);
   const [input, setInput] = useState("");
@@ -77,10 +76,12 @@ export function AssistantView({
   const [saveState, setSaveState] = useState("");
   const [evolutionReview, setEvolutionReview] = useState<EvolutionReview | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false);
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const followLatestRef = useRef(true);
   const scrollFrameRef = useRef<number | null>(null);
-  const suggestion = state.suggestions[0];
+  const suggestion = state.suggestions[0] ?? null;
+  const latestMetric = state.bodyMetrics.at(-1);
 
   const scrollChatToLatest = useCallback((behavior: ScrollBehavior = "auto") => {
     const element = chatMessagesRef.current;
@@ -99,8 +100,7 @@ export function AssistantView({
         const result = await response.json() as { users?: Array<{ id: string; name: string; phone: string; role: string; status: string }> };
         const members = result.users?.filter((user) => Boolean(user.id) && user.role === "member" && user.status === "active") ?? [];
         if (!members.length) return;
-        setMemberOptions(members.map((member, index) => ({
-          ...memberRows[index % memberRows.length],
+        setMemberOptions(members.map((member) => ({
           id: member.id,
           name: member.name,
           phone: member.phone,
@@ -142,7 +142,7 @@ export function AssistantView({
   }, []);
 
   const chartData = useMemo(
-    () => state.bodyMetrics.slice(-7).map((item, index) => ({ ...item, load: [1820, 1940, 1600, 2250, 1760, 2140, 1680][index] })),
+    () => state.bodyMetrics.slice(-7),
     [state.bodyMetrics],
   );
 
@@ -157,6 +157,7 @@ export function AssistantView({
     setBusy(true);
     const controller = new AbortController();
     abortRef.current = controller;
+    cancelledRef.current = false;
     const timeout = window.setTimeout(() => controller.abort(), 125_000);
     setMessages((items) => [...items, { role: "assistant", content: "", time: now() }]);
     try {
@@ -185,18 +186,32 @@ export function AssistantView({
       notify("AI 操作已完成，会员页面已自动同步");
     } catch (error) {
       const timedOut = (error as Error).name === "AbortError";
-      setMessages((items) => items.map((item, index) => index === items.length - 1 ? {
-        ...item,
-        content: timedOut
-          ? "Hermes 本次处理超时，任务未确认完成。请检查指令信息是否完整后重试。"
-          : "Hermes 暂时未能完成本次任务，请稍后重试；其他业务功能不受影响。",
-      } : item));
-      notify(timedOut ? "Hermes 处理超时，未确认任务完成" : "Hermes 服务暂时不可用", "warning");
+      const cancelled = cancelledRef.current;
+      if (cancelled) {
+        setMessages((items) => items.map((item, index) => index === items.length - 1 ? {
+          ...item,
+          content: item.content || "已停止生成。",
+        } : item));
+        notify("已停止生成", "info");
+      } else {
+        setMessages((items) => items.map((item, index) => index === items.length - 1 ? {
+          ...item,
+          content: timedOut
+            ? "Hermes 本次处理超时，任务未确认完成。请检查指令信息是否完整后重试。"
+            : "Hermes 暂时未能完成本次任务，请稍后重试；其他业务功能不受影响。",
+        } : item));
+        notify(timedOut ? "Hermes 处理超时，未确认任务完成" : "Hermes 服务暂时不可用", "warning");
+      }
     } finally {
       window.clearTimeout(timeout);
       setBusy(false);
       abortRef.current = null;
     }
+  }
+
+  function cancelGeneration() {
+    cancelledRef.current = true;
+    abortRef.current?.abort();
   }
 
   function choosePrompt(prompt: string) {
@@ -210,6 +225,10 @@ export function AssistantView({
   }
 
   function confirmAndSend() {
+    if (!suggestion) {
+      notify("当前会员暂无待处理的 AI 建议", "info");
+      return;
+    }
     updateSuggestion(suggestion.id, "待确认", { silent: true });
     setSaveState("发送任务已创建，请在企业微信客户端确认发送。");
   }
@@ -287,7 +306,7 @@ export function AssistantView({
               placeholder="输入你希望 AI 分析的问题或任务…"
               rows={3}
             />
-            <button className="send-button" type="submit" disabled={!input.trim() || busy} aria-label="发送给 AI">{busy ? <RefreshCcw className="spin" size={18} /> : <ArrowUp size={18} />}</button>
+            {busy ? <button className="send-button" type="button" onClick={cancelGeneration} aria-label="停止生成"><X size={18} /></button> : <button className="send-button" type="submit" disabled={!input.trim()} aria-label="发送给 AI"><ArrowUp size={18} /></button>}
           </form>
           <small className="ai-disclaimer">AI 建议仅供教练决策参考，不能替代医疗诊断。</small>
         </Card>
@@ -295,35 +314,33 @@ export function AssistantView({
         <div className="suggestion-column">
           <Card className="member-selector">
             <SectionTitle title="选择会员" />
-            <button onClick={() => setMemberOpen((open) => !open)} aria-expanded={memberOpen}><Avatar name={selectedProfile.name} /><span><b>{selectedProfile.name} <em>VIP</em></b><small>{selectedProfile.goal} · 已绑定唯一会员档案</small></span><ChevronDown size={18} /></button>
-            {memberOpen ? <div className="member-options">{memberOptions.slice(0, 8).map((member) => <button key={member.id} onClick={() => chooseMember(member.id)}><Avatar name={member.name} size="sm" />{member.name}<small>{member.goal} · {member.plan}</small></button>)}</div> : null}
-            <div><span>本周训练<b>4 / 5 次</b></span><span>恢复评分<b>68 分</b></span><span>最近训练<b>7 月 28 日</b></span></div>
+            <button onClick={() => setMemberOpen((open) => !open)} aria-expanded={memberOpen}><Avatar name={selectedProfile.name} /><span><b>{selectedProfile.name}</b><small>已绑定唯一会员档案</small></span><ChevronDown size={18} /></button>
+            {memberOpen ? <div className="member-options">{memberOptions.map((member) => <button key={member.id} onClick={() => chooseMember(member.id)}><Avatar name={member.name} size="sm" />{member.name}<small>{member.phone}</small></button>)}</div> : null}
+            <div><span>连续打卡<b>{state.streak} 天</b></span><span>身体记录<b>{state.bodyMetrics.length} 条</b></span><span>最近记录<b>{latestMetric?.date ?? "暂无"}</b></span></div>
           </Card>
           <Card>
             <div className="suggestion-heading">
               <div><span className="eyebrow">AI 草稿 · 待邵教练确认</span><h2>为{selectedProfile.name}生成的个性化建议</h2></div>
-              <div><button className="button button-secondary button-small" onClick={regenerate}><RefreshCcw size={15} /> 重新生成</button><button className="button button-secondary button-small" onClick={() => { updateSuggestion(suggestion.id, "草稿", { silent: true }); setSaveState("草稿已保存，可继续编辑"); }}><FileText size={15} /> 保存草稿</button></div>
+              <div><button className="button button-secondary button-small" onClick={regenerate}><RefreshCcw size={15} /> 重新生成</button><button className="button button-secondary button-small" onClick={() => { if (!suggestion) { notify("当前会员暂无待处理的 AI 建议", "info"); return; } updateSuggestion(suggestion.id, "草稿", { silent: true }); setSaveState("草稿已保存，可继续编辑"); }}><FileText size={15} /> 保存草稿</button></div>
             </div>
             <div className={`recommendation-list ${editing ? "is-editing" : ""}`}>
-              <Recommendation icon={Dumbbell} title="训练调整" text="近 7 天肩部疲劳度偏高，建议下调上肢推举动作强度 10–15%，重点进行肩袖稳定与灵活性训练。" source="训练记录 · 身体数据" editing={editing} onEdit={() => setEditing(true)} />
-              <Recommendation icon={Utensils} title="饮食建议" text="优质蛋白日摄入建议维持 1.6–1.8 g/kg，增加深色蔬菜与抗炎食物，减少高糖高油饮品。" source="饮食记录 · 身体数据" editing={editing} onEdit={() => setEditing(true)} />
-              <Recommendation icon={MoonStar} title="恢复提醒" text="最近睡眠 6.2 小时，建议保证 7–8 小时睡眠；睡前进行 10 分钟呼吸与肩部放松。" source="身体数据 · 打卡记录" editing={editing} onEdit={() => setEditing(true)} />
-              <Recommendation icon={ShieldAlert} title="风险提示" text="肩部酸痛持续较多，若出现夜间痛或活动受限，应暂停相关负荷并及时咨询专业医务人员。" source="沟通记录 · 风险规则" editing={editing} onEdit={() => setEditing(true)} />
-              <Recommendation icon={ClipboardCheck} title="跟进任务" text="安排一次肩部放松与动作评估；下周训练前复测恢复评分，并根据结果调整计划。" source="沟通记录" editing={editing} onEdit={() => setEditing(true)} />
+              {state.suggestions.length ? state.suggestions.map((item) => {
+                const icon = item.category === "饮食建议" ? Utensils : item.category === "恢复提醒" ? MoonStar : item.category === "风险提示" ? ShieldAlert : item.category === "训练调整" ? Dumbbell : ClipboardCheck;
+                return <Recommendation key={item.id} icon={icon} title={item.title} text={item.content} source={`${item.category} · ${item.priority}`} editing={editing} onEdit={() => setEditing(true)} />;
+              }) : <div className="empty-hint">当前会员暂无 AI 建议草稿。可在左侧对话中让 Hermes 生成建议。</div>}
             </div>
             {saveState ? <div className="inline-save-state"><ClipboardCheck size={16} /> {saveState}</div> : null}
-            <div className="suggestion-actions"><button className="button button-secondary" onClick={() => { setEditing((value) => !value); if (editing) { updateSuggestion(suggestion.id, "草稿", { silent: true }); setSaveState("修改已保存到草稿"); } }}><Edit3 size={17} /> {editing ? "完成修改" : "修改建议"}</button><button className="button button-primary" onClick={confirmAndSend}><Send size={17} /> 创建发送任务</button></div>
+            <div className="suggestion-actions"><button className="button button-secondary" onClick={() => { setEditing((value) => !value); if (editing && suggestion) { updateSuggestion(suggestion.id, "草稿", { silent: true }); setSaveState("修改已保存到草稿"); } }}><Edit3 size={17} /> {editing ? "完成修改" : "修改建议"}</button><button className="button button-primary" onClick={confirmAndSend}><Send size={17} /> 创建发送任务</button></div>
           </Card>
         </div>
 
         <div className="evidence-column">
           <Card>
             <SectionTitle title="会员证据概览" action={<button className="text-button" onClick={() => { setEvidenceTab("全部"); setEvidenceOpen(true); }}>查看全部</button>} />
-            <div className="evidence-list"><Evidence icon={Dumbbell} label="训练记录" value="本周 4 / 5 次 · 负荷 1,820 kcal" onClick={() => { setEvidenceTab("训练"); setEvidenceOpen(true); }} /><Evidence icon={Activity} label="身体数据" value="体重 67.9 kg · 体脂 14.2%" onClick={() => { setEvidenceTab("身体"); setEvidenceOpen(true); }} /><Evidence icon={MoonStar} label="打卡记录" value="睡眠 6.2h · 恢复评分 68" onClick={() => { setEvidenceTab("打卡"); setEvidenceOpen(true); }} /><Evidence icon={MessageCircleMore} label="沟通记录" value="肩部酸痛（训练中出现）" onClick={() => { setEvidenceTab("沟通"); setEvidenceOpen(true); }} /></div>
+            <div className="evidence-list"><Evidence icon={Dumbbell} label="训练记录" value={state.trainingPlan?.days?.length ? `${state.trainingPlan.days.length} 个训练日 · ${state.trainingPlan.phase}` : "暂无训练方案"} onClick={() => { setEvidenceTab("训练"); setEvidenceOpen(true); }} /><Evidence icon={Activity} label="身体数据" value={latestMetric ? `体重 ${latestMetric.weight} kg · 体脂 ${latestMetric.bodyFat}%` : "暂无记录"} onClick={() => { setEvidenceTab("身体"); setEvidenceOpen(true); }} /><Evidence icon={MoonStar} label="打卡记录" value={`连续打卡 ${state.streak} 天`} onClick={() => { setEvidenceTab("打卡"); setEvidenceOpen(true); }} /><Evidence icon={MessageCircleMore} label="沟通记录" value="AI 对话记录见左侧历史" onClick={() => { setEvidenceTab("沟通"); setEvidenceOpen(true); }} /></div>
           </Card>
           <Card>
             <SectionTitle title="趋势图表（近 7 天）" />
-            <MiniTrend title="训练负荷（kcal）" data={chartData} dataKey="load" />
             <MiniTrend title="体重（kg）" data={chartData} dataKey="weight" />
             <MiniTrend title="体脂率（%）" data={chartData} dataKey="bodyFat" />
           </Card>

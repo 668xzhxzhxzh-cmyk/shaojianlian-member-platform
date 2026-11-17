@@ -238,7 +238,13 @@ export function PortalProvider({ children, role }: { children: React.ReactNode; 
       const item: BodyFeedback = {
         ...feedback,
         id: `feedback-${Date.now()}`,
-        date: new Date().toISOString().slice(0, 10),
+        // 使用中国时区日期，避免凌晨 0-8 点记录被记到前一天。
+        date: new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Shanghai",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date()),
       };
       setState((current) => ({ ...current, bodyFeedbacks: [...(current.bodyFeedbacks ?? []), item] }));
       void persist(role, "coach_body_feedback", { member_id: target, feedback: item });
