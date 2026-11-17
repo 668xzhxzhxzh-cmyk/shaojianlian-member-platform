@@ -9,7 +9,6 @@ import {
   CalendarDays,
   Check,
   CircleDollarSign,
-  Clock3,
   Cloud,
   Database,
   Dumbbell,
@@ -21,129 +20,12 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
-  UserRoundPlus,
   UsersRound,
   X,
 } from "lucide-react";
-import { memberRows } from "@/lib/portal-data";
 import { portalFetch } from "@/lib/portal-auth";
 import { usePortal } from "./portal-context";
-import { Avatar, Card, Ring, SectionTitle, StatCard, TrendChart } from "./ui";
-
-const attendanceData = [
-  { date: "6/29", value: 56 }, { date: "7/4", value: 74 }, { date: "7/9", value: 61 },
-  { date: "7/14", value: 83 }, { date: "7/19", value: 64 }, { date: "7/24", value: 70 }, { date: "7/29", value: 82 },
-];
-
-export function CoachView({ openAssistant }: { openAssistant: () => void }) {
-  const { state, role, updateSuggestion, notify } = usePortal();
-  const [search, setSearch] = useState("");
-  const [risk, setRisk] = useState("全部风险等级");
-  const [newMemberOpen, setNewMemberOpen] = useState(false);
-  const [temporaryPassword, setTemporaryPassword] = useState<{ name: string; password: string } | null>(null);
-  const pending = state.suggestions.filter((item) => item.status === "待确认");
-  const visibleMembers = memberRows.filter((member) => (!search || member.name.includes(search) || member.plan.includes(search)) && (risk === "全部风险等级" || member.risk === risk));
-
-  async function addMember(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const name = String(data.get("name") || "");
-    try {
-      const response = await portalFetch("/api/users", role, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, phone: data.get("phone"), role: "member" }),
-      });
-      if (response.status === 404) {
-        notify("当前运行环境未启用此功能，请在生产环境操作", "info");
-      } else {
-        const result = await response.json() as { temporaryPassword?: string; error?: string };
-        if (!response.ok) throw new Error(result.error || "会员创建失败");
-        if (result.temporaryPassword) {
-          setTemporaryPassword({ name, password: result.temporaryPassword });
-        } else {
-          notify(`${name} 已创建`, "success");
-        }
-      }
-      setNewMemberOpen(false);
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "会员创建失败", "warning");
-    }
-  }
-
-  return (
-    <div className="view-stack management-view">
-      <section className="welcome-row"><div><span className="eyebrow">教练工作台</span><h1>上午好，邵教练</h1><p>今天有 15 次排期、8 条 AI 建议等待确认；AI 修改会自动同步。</p></div><div className="inline-actions"><button className="button button-primary" onClick={() => setNewMemberOpen(true)}><UserRoundPlus size={17} /> 新增会员</button></div></section>
-      <div className="stats-grid five">
-        <StatCard icon={UsersRound} label="会员总数" value="128" note="较昨日 +8" />
-        <StatCard icon={UserRoundPlus} label="今日新增" value="2" note="较昨日 +1" accent="amber" />
-        <StatCard icon={Dumbbell} label="今日训练" value="15" note="完成率 75%" />
-        <StatCard icon={CalendarDays} label="本周排期" value="32" note="较上周 +6" accent="slate" />
-        <StatCard icon={CircleDollarSign} label="本月收入" value="¥128,620" note="较上月 +13%" />
-      </div>
-      <div className="coach-dashboard-grid">
-        <Card className="span-2">
-          <SectionTitle title="会员健康状态" action={<div className="table-tools"><select value={risk} onChange={(event) => setRisk(event.target.value)}><option>全部风险等级</option><option>良好</option><option>注意</option><option>需关注</option></select><label><Search size={15} /><input placeholder="搜索会员" value={search} onChange={(event) => setSearch(event.target.value)} /></label></div>} />
-          <div className="member-table">
-            <div className="table-row table-head"><span>会员</span><span>当前计划</span><span>最后打卡</span><span>恢复状态</span><span>出勤率</span><span>状态</span></div>
-            {visibleMembers.map((member) => <button className="table-row" key={member.name} onClick={() => notify(`已打开 ${member.name} 的会员健康档案`, "info")}><span><Avatar name={member.name} size="sm" />{member.name}</span><span>{member.plan}</span><span>{member.last}</span><span><i className={`risk-dot risk-${member.risk}`} />{member.recovery}%</span><span>{member.attendance}%</span><em className={`risk-badge risk-${member.risk}`}>{member.risk}</em></button>)}
-          </div>
-          <button className="text-button centered" onClick={() => { setSearch(""); setRisk("全部风险等级"); notify("已显示全部会员"); }}>查看全部会员 <ArrowRight size={15} /></button>
-        </Card>
-        <Card>
-          <SectionTitle title="今日排期" />
-          <div className="appointment-list">
-            {[
-              ["08:00", "李明远", "私教课 · 力量进阶", "已开始"],
-              ["09:30", "王雨桐", "一对一私教", "待开始"],
-              ["10:30", "张小北", "HIIT 高强度燃脂", "待开始"],
-              ["14:00", "陈思颖", "核心强化课", "待开始"],
-              ["16:00", "刘一航", "功能训练", "已取消"],
-            ].map((item) => <div key={item[0]}><time>{item[0]}</time><span><b>{item[1]}</b><small>{item[2]}</small></span><em>{item[3]}</em></div>)}
-          </div>
-        </Card>
-        <Card>
-          <SectionTitle title="需要处理" />
-          <div className="task-groups"><Task icon={MessageCircleMore} label="未读会员消息" count={12} onClick={() => notify("已打开未读会员消息", "info")} /><Task icon={Clock3} label="即将到期会员" count={5} onClick={() => notify("已筛选 30 天内到期会员", "info")} /><Task icon={AlertTriangle} label="高风险健康预警" count={3} onClick={() => setRisk("需关注")} /></div>
-        </Card>
-        <Card className="span-2">
-          <SectionTitle title="训练计划执行率" action={<span className="pill">近 30 天</span>} />
-          <TrendChart data={attendanceData} dataKey="value" height={230} valueSuffix="%" />
-          <div className="mini-kpis"><span>平均执行率 <b>78%</b></span><span>计划完成率 <b>72%</b></span><span>按时完成率 <b>68%</b></span></div>
-        </Card>
-        <Card>
-          <SectionTitle title="打卡执行概览" />
-          <div className="split-center"><Ring value={78} label="126" sublabel="总打卡" /><div className="legend-stack"><span><i className="green" />按时完成 98 人</span><span><i className="amber" />延迟完成 18 人</span><span><i className="red" />未完成 10 人</span></div></div>
-        </Card>
-      </div>
-      <Card>
-        <SectionTitle title={`AI 待确认建议 · ${pending.length}`} action={<button className="text-button" onClick={openAssistant}>进入 AI 工作台 <ArrowRight size={15} /></button>} />
-        <div className="suggestion-strip">
-          {state.suggestions.map((suggestion) => <article key={suggestion.id}><Avatar name={suggestion.member} /><div><b>{suggestion.member} · {suggestion.title}</b><p>{suggestion.content}</p><span>{suggestion.category} · {suggestion.priority}</span></div><div>{suggestion.status === "已发送" ? <em className="sent"><Check size={14} /> 已创建任务</em> : <><button className="button button-secondary button-small" onClick={openAssistant}>查看</button><button className="button button-primary button-small" onClick={() => { updateSuggestion(suggestion.id, "已发送", { silent: true }); notify("发送任务已创建，请在企业微信客户端确认发送。"); }}><Send size={14} /> 确认</button></>}</div></article>)}
-        </div>
-      </Card>
-      {newMemberOpen ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setNewMemberOpen(false)}>
-          <form className="modal modal-compact" onSubmit={addMember} onMouseDown={(event) => event.stopPropagation()}>
-            <button type="button" className="icon-button modal-close" onClick={() => setNewMemberOpen(false)} aria-label="关闭"><X size={20} /></button>
-            <span className="eyebrow">会员管理</span><h2>新增会员</h2><p>创建账号后，登录信息将由教练确认再发送。</p>
-            <label className="stacked-label">姓名<input name="name" required maxLength={30} placeholder="请输入会员姓名" /></label>
-            <label className="stacked-label">手机号<input name="phone" inputMode="numeric" pattern="1[0-9]{10}" required placeholder="11 位手机号" /></label>
-            <label className="stacked-label">会员计划<select name="plan"><option>尊享会员 · 年度计划</option><option>季度计划</option><option>体验计划</option></select></label>
-            <button className="button button-primary full" type="submit">创建会员账号</button>
-          </form>
-        </div>
-      ) : null}
-      {temporaryPassword ? (
-        <TemporaryPasswordModal name={temporaryPassword.name} password={temporaryPassword.password} onClose={() => setTemporaryPassword(null)} />
-      ) : null}
-    </div>
-  );
-}
-
-function Task({ icon: Icon, label, count, onClick }: { icon: typeof MessageCircleMore; label: string; count: number; onClick: () => void }) {
-  return <button onClick={onClick}><Icon size={20} /><span>{label}<small>{count} 项待处理</small></span><b>{count}</b><ArrowRight size={16} /></button>;
-}
+import { Avatar, Card, SectionTitle, StatCard } from "./ui";
 
 type AdminSection = "overview" | "ai-suggestions" | "notifications" | "users" | "settings";
 type AdminUser = { id: string; name: string; role: string; phone: string; status: string };
@@ -167,18 +49,8 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null);
   const [managedUser, setManagedUser] = useState<AdminUser | null>(null);
   const [temporaryPassword, setTemporaryPassword] = useState<{ name: string; password: string } | null>(null);
-  const [users, setUsers] = useState<AdminUser[]>([
-    { id: "admin-shao", name: "系统管理员", role: "管理员", phone: "138****8808", status: "正常" },
-    { id: "coach-shao", name: "邵教练", role: "教练", phone: "138****6608", status: "正常" },
-    { id: "member-li", name: "李明", role: "尊享会员", phone: "138****5206", status: "正常" },
-    { id: "member-wang", name: "王芳", role: "年度会员", phone: "136****1183", status: "正常" },
-    { id: "member-zhang", name: "张伟", role: "季度会员", phone: "159****9021", status: "待激活" },
-  ]);
-  const [notifications, setNotifications] = useState([
-    { id: "n1", title: "课程排期待确认", detail: "李明 · 7 月 31 日 18:00 一对一私教", read: false },
-    { id: "n2", title: "AI 已更新训练方案", detail: "王芳 · 训练频次调整为每周 3 次", read: false },
-    { id: "n3", title: "会员身体数据已更新", detail: "张伟新增体重与体脂记录", read: true },
-  ]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [notifications, setNotifications] = useState<{ id: string; title: string; detail: string; read: boolean }[]>([]);
   const [settings, setSettings] = useState({ city: "鄂州", timezone: "Asia/Shanghai", hermesAutoSync: true, memberRegistration: true });
   const [integrationHealth, setIntegrationHealth] = useState<IntegrationHealth>({ ai: null, memberTools: null, wecomContact: null, wecomCallback: null, wecomApp: null });
   const visibleUsers = users.filter((user) => !search || `${user.name}${user.role}${user.phone}${user.status}`.includes(search));
@@ -445,10 +317,10 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
     <div className="view-stack management-view">
       <section className="welcome-row"><div><span className="eyebrow">管理后台</span><h1>系统运营总览</h1><p>鄂州站 · 数据更新时间：刚刚</p></div><div className="inline-actions"><button className="button button-secondary" onClick={exportData}><FileDown size={17} /> 导出数据</button><button className="button button-primary" onClick={() => setAccountOpen(true)}><Plus size={17} /> 新增账号</button></div></section>
       <div className="stats-grid four">
-        <StatCard icon={UsersRound} label="活跃会员" value="128" note="月活 96%" />
-        <StatCard icon={Dumbbell} label="本月训练" value="486" note="较上月 +12%" accent="amber" />
-        <StatCard icon={CalendarDays} label="课程排期" value="322" note="履约率 92%" />
-        <StatCard icon={CircleDollarSign} label="本月收入" value="¥128,620" note="较上月 +13%" />
+        <StatCard icon={UsersRound} label="会员账号" value={users.filter((user) => user.role === "会员").length} note="实时账号列表" />
+        <StatCard icon={Dumbbell} label="本月训练" value="—" note="统计功能后续版本提供" accent="amber" />
+        <StatCard icon={CalendarDays} label="课程排期" value="—" note="统计功能后续版本提供" />
+        <StatCard icon={CircleDollarSign} label="本月收入" value="—" note="统计功能后续版本提供" />
       </div>
       <div className="admin-grid">
         <Card className="span-2">
@@ -457,7 +329,7 @@ export function AdminView({ section = "overview" }: { section?: AdminSection }) 
         </Card>
         <Card>
           <SectionTitle title="安全与合规" />
-          <div className="compliance-list"><p><ShieldCheck size={19} /><span><b>数据传输加密</b><small>HTTPS / TLS 已启用</small></span><BadgeCheck size={17} /></p><p><Database size={19} /><span><b>每日自动备份</b><small>保留 14 天，可恢复</small></span><BadgeCheck size={17} /></p><p><Settings size={19} /><span><b>ICP备案</b><small>绑定域名前需完成</small></span><AlertTriangle size={17} /></p></div>
+          <div className="compliance-list"><p><ShieldCheck size={19} /><span><b>数据传输加密</b><small>HTTPS 待备案域名后启用</small></span><AlertTriangle size={17} /></p><p><Database size={19} /><span><b>每日自动备份</b><small>保留 14 天，可恢复</small></span><BadgeCheck size={17} /></p><p><Settings size={19} /><span><b>ICP备案</b><small>绑定域名前需完成</small></span><AlertTriangle size={17} /></p></div>
         </Card>
         <Card className="span-2">
           <SectionTitle title="用户与角色" action={<label className="search-input"><Search size={16} /><input placeholder="搜索姓名、手机号或角色" value={search} onChange={(event) => setSearch(event.target.value)} /></label>} />
